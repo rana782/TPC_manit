@@ -1,0 +1,35 @@
+# Project Status & Environment Backup
+
+## Current Stack
+- **Backend:** Node.js, Express, TypeScript, Prisma ORM, PostgreSQL.
+- **Frontend:** React (v18.2.0), Vite, TypeScript.
+- **Database:** Prisma (v5.0.0).
+
+## Running Locally
+
+### Backend
+To run the backend development server:
+1. `cd backend`
+2. `npm install`
+3. Copy `.env.example` to `.env` and set `DATABASE_URL`.
+4. Run migrations: `npm run migrate`
+5. Start server: `npm run dev`
+
+### Frontend
+To run the frontend development server:
+1. `cd frontend`
+2. `npm install`
+3. Start frontend: `npm run dev`
+
+## Missing Bits & Implementation Plan (Modules 02-12)
+- **Module 02:** Advanced Database Schema & Migrations (Checklists, robust Jobs constraints).
+- **Module 03:** Student Profile & Detailed Privacy Rules (granular sharing).
+- **Module 04:** Job Management & Dynamic Application Forms based on SPOC checklists.
+- **Module 05:** Lifecycle Statuses (`Applied`, `OA_Scheduled`, `Interview_Scheduled`, `Placed`, `Rejected`).
+- **Module 06:** Profile Locking logic (On-Campus vs. Off-Campus) and Coordinators Overrides.
+- **Module 07:** ATS Resume Scoring Engine (SBERT / OpenAI text-embedding-3-small).
+- **Module 08:** LinkedIn Announcements via Zapier webhooks.
+- **Module 09:** WhatsApp Notifications logic (Twilio).
+- **Module 10:** Frontend updates for Authentication & Profiles (OTP, OAuth).
+- **Module 11:** Frontend UI for Job Application processing and ATS scoring.
+- **Module 12:** Complete system smoke tests and integration layer validations.

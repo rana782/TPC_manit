@@ -1,0 +1,52 @@
+﻿
+Running 1 test using 1 worker
+
+node.exe : Status: failed 
+- Test failed: Flow 3: 
+Application Process with 
+ATS Recommendation
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (S  
+  tatus: failed ... Rec   
+ ommendation:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+  Γ£ÿ  1 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:297:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 3: Application Process with ATS Recommendation (6.8s)
+
+
+  1) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:297:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 3: Application Process with ATS Recommendation 
+
+    Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+    Locator: locator('h3:has-text("Apply:")')
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+    [2m  - Expect "toBeVisible" with timeout 5000ms[22m
+    [2m  - waiting for locator('h3:has-text("Apply:")')[22m
+
+
+      300 |     
+      301 |     // Check Modal
+    > 302 |     await expect(page.locator('h3:has-text("Apply:")')).toBeVisible();
+          |                                                         ^
+      303 |     
+      304 |     // ATS Recommendation check (Wait for "Recommended" badge or scoring text to appear/disappear)
+      305 |     await page.waitForTimeout(2000); // Give scoring a moment
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:302:57
+
+  1 failed
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:297:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 3: Application Process with ATS Recommendation 

@@ -1,0 +1,27 @@
+﻿
+Running 4 tests using 1 worker
+
+  Γ£ô  1 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:274:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 1: Filter Jobs by Search and Branch (945ms)
+  Γ£ô  2 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:289:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 2: CTC Filter (865ms)
+node.exe : Status: failed 
+- Test failed: Flow 3: 
+Application Process with 
+ATS Recommendation
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (S  
+  tatus: failed ... Rec   
+ ommendation:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+  Γ£ÿ  3 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:295:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 3: Application Process with ATS Recommendation (5.9s)

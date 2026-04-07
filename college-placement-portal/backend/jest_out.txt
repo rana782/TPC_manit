@@ -1,0 +1,121 @@
+FAIL src/tests/job.test.ts (23.692 s)
+  ● Job Posting Endpoints › should deny STUDENTS from creating a job
+
+    PrismaClientInitializationError: 
+    Invalid `prisma.jobApplication.deleteMany()` invocation in
+    C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\backend\src\tests\job.test.ts:18:37
+
+      15 
+      16 beforeAll(async () => {
+      17     // Cleanup existing mock accounts in case previous test leaked
+    → 18     await prisma.jobApplication.deleteMany(
+    Can't reach database server at `localhost:5433`
+
+    Please make sure your database server is running at `localhost:5433`.
+
+      at $n.handleRequestError (node_modules/@prisma/client/runtime/library.js:121:7615)
+      at $n.handleAndLogRequestError (node_modules/@prisma/client/runtime/library.js:121:6623)
+      at $n.request (node_modules/@prisma/client/runtime/library.js:121:6307)
+      at l (node_modules/@prisma/client/runtime/library.js:130:9633)
+
+  ● Job Posting Endpoints › should allow SPOCs to create a job
+
+    PrismaClientInitializationError: 
+    Invalid `prisma.jobApplication.deleteMany()` invocation in
+    C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\backend\src\tests\job.test.ts:18:37
+
+      15 
+      16 beforeAll(async () => {
+      17     // Cleanup existing mock accounts in case previous test leaked
+    → 18     await prisma.jobApplication.deleteMany(
+    Can't reach database server at `localhost:5433`
+
+    Please make sure your database server is running at `localhost:5433`.
+
+      at $n.handleRequestError (node_modules/@prisma/client/runtime/library.js:121:7615)
+      at $n.handleAndLogRequestError (node_modules/@prisma/client/runtime/library.js:121:6623)
+      at $n.request (node_modules/@prisma/client/runtime/library.js:121:6307)
+      at l (node_modules/@prisma/client/runtime/library.js:130:9633)
+
+  ● Job Posting Endpoints › should return 400 for invalid job inputs
+
+    PrismaClientInitializationError: 
+    Invalid `prisma.jobApplication.deleteMany()` invocation in
+    C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\backend\src\tests\job.test.ts:18:37
+
+      15 
+      16 beforeAll(async () => {
+      17     // Cleanup existing mock accounts in case previous test leaked
+    → 18     await prisma.jobApplication.deleteMany(
+    Can't reach database server at `localhost:5433`
+
+    Please make sure your database server is running at `localhost:5433`.
+
+      at $n.handleRequestError (node_modules/@prisma/client/runtime/library.js:121:7615)
+      at $n.handleAndLogRequestError (node_modules/@prisma/client/runtime/library.js:121:6623)
+      at $n.request (node_modules/@prisma/client/runtime/library.js:121:6307)
+      at l (node_modules/@prisma/client/runtime/library.js:130:9633)
+
+  ● Job Posting Endpoints › should list jobs for any authenticated user
+
+    PrismaClientInitializationError: 
+    Invalid `prisma.jobApplication.deleteMany()` invocation in
+    C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\backend\src\tests\job.test.ts:18:37
+
+      15 
+      16 beforeAll(async () => {
+      17     // Cleanup existing mock accounts in case previous test leaked
+    → 18     await prisma.jobApplication.deleteMany(
+    Can't reach database server at `localhost:5433`
+
+    Please make sure your database server is running at `localhost:5433`.
+
+      at $n.handleRequestError (node_modules/@prisma/client/runtime/library.js:121:7615)
+      at $n.handleAndLogRequestError (node_modules/@prisma/client/runtime/library.js:121:6623)
+      at $n.request (node_modules/@prisma/client/runtime/library.js:121:6307)
+      at l (node_modules/@prisma/client/runtime/library.js:130:9633)
+
+  ● Job Posting Endpoints › should allow SPOC to delete a job
+
+    PrismaClientInitializationError: 
+    Invalid `prisma.jobApplication.deleteMany()` invocation in
+    C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\backend\src\tests\job.test.ts:18:37
+
+      15 
+      16 beforeAll(async () => {
+      17     // Cleanup existing mock accounts in case previous test leaked
+    → 18     await prisma.jobApplication.deleteMany(
+    Can't reach database server at `localhost:5433`
+
+    Please make sure your database server is running at `localhost:5433`.
+
+      at $n.handleRequestError (node_modules/@prisma/client/runtime/library.js:121:7615)
+      at $n.handleAndLogRequestError (node_modules/@prisma/client/runtime/library.js:121:6623)
+      at $n.request (node_modules/@prisma/client/runtime/library.js:121:6307)
+      at l (node_modules/@prisma/client/runtime/library.js:130:9633)
+
+
+  ● Test suite failed to run
+
+    PrismaClientInitializationError: 
+    Invalid `prisma.jobApplication.deleteMany()` invocation in
+    C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\backend\src\tests\job.test.ts:46:37
+
+      43 });
+      44 
+      45 afterAll(async () => {
+    → 46     await prisma.jobApplication.deleteMany(
+    Can't reach database server at `localhost:5433`
+
+    Please make sure your database server is running at `localhost:5433`.
+
+      at $n.handleRequestError (node_modules/@prisma/client/runtime/library.js:121:7615)
+      at $n.handleAndLogRequestError (node_modules/@prisma/client/runtime/library.js:121:6623)
+      at $n.request (node_modules/@prisma/client/runtime/library.js:121:6307)
+      at l (node_modules/@prisma/client/runtime/library.js:130:9633)
+
+Test Suites: 1 failed, 1 total
+Tests:       5 failed, 5 total
+Snapshots:   0 total
+Time:        23.838 s, estimated 27 s
+Ran all test suites matching /src\\tests\\job.test.ts/i.

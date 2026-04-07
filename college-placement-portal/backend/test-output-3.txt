@@ -1,0 +1,365 @@
+﻿node.exe : FAIL src/tests/
+profileLock.test.ts 
+(12.134 s)
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (F  
+  AIL src/tests/...t.ts   
+  (12.134 s):String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+  ΓùÅ Profile Locking 
+Endpoints ΓÇ║ 1. SPOC 
+should be able to 
+explicitly lock a student 
+profile
+
+    PrismaClientInitializa
+tionError: 
+    Invalid `prisma.jobApp
+lication.deleteMany()` 
+invocation in
+    C:\Users\RANA\Desktop\
+college-placement-portal\c
+ollege-placement-portal\ba
+ckend\src\tests\profileLoc
+k.test.ts:23:37
+
+      20 let 
+applicationId = '';
+      21 
+      22 beforeAll(async 
+() => {
+    ΓåÆ 23     await prism
+a.jobApplication.deleteMan
+y(
+    Can't reach database 
+server at `localhost:5433`
+
+    Please make sure your 
+database server is 
+running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError (nod
+e_modules/@prisma/client/r
+untime/library.js:121:7615
+)
+      at $n.handleAndLogRe
+questError (node_modules/@
+prisma/client/runtime/libr
+ary.js:121:6623)
+      at $n.request (node_
+modules/@prisma/client/run
+time/library.js:121:6307)
+      at l (node_modules/@
+prisma/client/runtime/libr
+ary.js:130:9633)
+
+  ΓùÅ Profile Locking 
+Endpoints ΓÇ║ 2. Locked 
+student should not be 
+able to apply for jobs
+
+    PrismaClientInitializa
+tionError: 
+    Invalid `prisma.jobApp
+lication.deleteMany()` 
+invocation in
+    C:\Users\RANA\Desktop\
+college-placement-portal\c
+ollege-placement-portal\ba
+ckend\src\tests\profileLoc
+k.test.ts:23:37
+
+      20 let 
+applicationId = '';
+      21 
+      22 beforeAll(async 
+() => {
+    ΓåÆ 23     await prism
+a.jobApplication.deleteMan
+y(
+    Can't reach database 
+server at `localhost:5433`
+
+    Please make sure your 
+database server is 
+running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError (nod
+e_modules/@prisma/client/r
+untime/library.js:121:7615
+)
+      at $n.handleAndLogRe
+questError (node_modules/@
+prisma/client/runtime/libr
+ary.js:121:6623)
+      at $n.request (node_
+modules/@prisma/client/run
+time/library.js:121:6307)
+      at l (node_modules/@
+prisma/client/runtime/libr
+ary.js:130:9633)
+
+  ΓùÅ Profile Locking 
+Endpoints ΓÇ║ 3. SPOC 
+should NOT be able to 
+unlock the student
+
+    PrismaClientInitializa
+tionError: 
+    Invalid `prisma.jobApp
+lication.deleteMany()` 
+invocation in
+    C:\Users\RANA\Desktop\
+college-placement-portal\c
+ollege-placement-portal\ba
+ckend\src\tests\profileLoc
+k.test.ts:23:37
+
+      20 let 
+applicationId = '';
+      21 
+      22 beforeAll(async 
+() => {
+    ΓåÆ 23     await prism
+a.jobApplication.deleteMan
+y(
+    Can't reach database 
+server at `localhost:5433`
+
+    Please make sure your 
+database server is 
+running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError (nod
+e_modules/@prisma/client/r
+untime/library.js:121:7615
+)
+      at $n.handleAndLogRe
+questError (node_modules/@
+prisma/client/runtime/libr
+ary.js:121:6623)
+      at $n.request (node_
+modules/@prisma/client/run
+time/library.js:121:6307)
+      at l (node_modules/@
+prisma/client/runtime/libr
+ary.js:130:9633)
+
+  ΓùÅ Profile Locking 
+Endpoints ΓÇ║ 4. 
+Coordinator should be 
+able to unlock the student
+
+    PrismaClientInitializa
+tionError: 
+    Invalid `prisma.jobApp
+lication.deleteMany()` 
+invocation in
+    C:\Users\RANA\Desktop\
+college-placement-portal\c
+ollege-placement-portal\ba
+ckend\src\tests\profileLoc
+k.test.ts:23:37
+
+      20 let 
+applicationId = '';
+      21 
+      22 beforeAll(async 
+() => {
+    ΓåÆ 23     await prism
+a.jobApplication.deleteMan
+y(
+    Can't reach database 
+server at `localhost:5433`
+
+    Please make sure your 
+database server is 
+running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError (nod
+e_modules/@prisma/client/r
+untime/library.js:121:7615
+)
+      at $n.handleAndLogRe
+questError (node_modules/@
+prisma/client/runtime/libr
+ary.js:121:6623)
+      at $n.request (node_
+modules/@prisma/client/run
+time/library.js:121:6307)
+      at l (node_modules/@
+prisma/client/runtime/libr
+ary.js:130:9633)
+
+  ΓùÅ Profile Locking 
+Endpoints ΓÇ║ 5. SPOC 
+cannot lock themselves
+
+    PrismaClientInitializa
+tionError: 
+    Invalid `prisma.jobApp
+lication.deleteMany()` 
+invocation in
+    C:\Users\RANA\Desktop\
+college-placement-portal\c
+ollege-placement-portal\ba
+ckend\src\tests\profileLoc
+k.test.ts:23:37
+
+      20 let 
+applicationId = '';
+      21 
+      22 beforeAll(async 
+() => {
+    ΓåÆ 23     await prism
+a.jobApplication.deleteMan
+y(
+    Can't reach database 
+server at `localhost:5433`
+
+    Please make sure your 
+database server is 
+running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError (nod
+e_modules/@prisma/client/r
+untime/library.js:121:7615
+)
+      at $n.handleAndLogRe
+questError (node_modules/@
+prisma/client/runtime/libr
+ary.js:121:6623)
+      at $n.request (node_
+modules/@prisma/client/run
+time/library.js:121:6307)
+      at l (node_modules/@
+prisma/client/runtime/libr
+ary.js:130:9633)
+
+  ΓùÅ Profile Locking 
+Endpoints ΓÇ║ 6. SPOC 
+locking as 
+PLACED_ON_CAMPUS creates 
+placement record
+
+    PrismaClientInitializa
+tionError: 
+    Invalid `prisma.jobApp
+lication.deleteMany()` 
+invocation in
+    C:\Users\RANA\Desktop\
+college-placement-portal\c
+ollege-placement-portal\ba
+ckend\src\tests\profileLoc
+k.test.ts:23:37
+
+      20 let 
+applicationId = '';
+      21 
+      22 beforeAll(async 
+() => {
+    ΓåÆ 23     await prism
+a.jobApplication.deleteMan
+y(
+    Can't reach database 
+server at `localhost:5433`
+
+    Please make sure your 
+database server is 
+running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError (nod
+e_modules/@prisma/client/r
+untime/library.js:121:7615
+)
+      at $n.handleAndLogRe
+questError (node_modules/@
+prisma/client/runtime/libr
+ary.js:121:6623)
+      at $n.request (node_
+modules/@prisma/client/run
+time/library.js:121:6307)
+      at l (node_modules/@
+prisma/client/runtime/libr
+ary.js:130:9633)
+
+
+  ΓùÅ Test suite failed 
+to run
+
+    PrismaClientInitializa
+tionError: 
+    Invalid `prisma.jobApp
+lication.deleteMany()` 
+invocation in
+    C:\Users\RANA\Desktop\
+college-placement-portal\c
+ollege-placement-portal\ba
+ckend\src\tests\profileLoc
+k.test.ts:76:37
+
+      73 });
+      74 
+      75 afterAll(async 
+() => {
+    ΓåÆ 76     await prism
+a.jobApplication.deleteMan
+y(
+    Can't reach database 
+server at `localhost:5433`
+
+    Please make sure your 
+database server is 
+running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError (nod
+e_modules/@prisma/client/r
+untime/library.js:121:7615
+)
+      at $n.handleAndLogRe
+questError (node_modules/@
+prisma/client/runtime/libr
+ary.js:121:6623)
+      at $n.request (node_
+modules/@prisma/client/run
+time/library.js:121:6307)
+      at l (node_modules/@
+prisma/client/runtime/libr
+ary.js:130:9633)
+
+Test Suites: 1 failed, 1 
+total
+Tests:       6 failed, 6 
+total
+Snapshots:   0 total
+Time:        12.212 s, 
+estimated 13 s
+Ran all test suites 
+matching /src\\tests\\prof
+ileLock.test.ts/i.

@@ -1,0 +1,108 @@
+﻿
+Running 4 tests using 1 worker
+
+node.exe : Status: failed 
+- Test failed: Flow 1: 
+Filter Jobs by Search and 
+Branch
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (S  
+  tatus: failed ...arch   
+  and Branch:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+  Γ£ÿ  1 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:274:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 1: Filter Jobs by Search and Branch (2.3s)
+Status: failed - Test 
+failed: Flow 2: CTC Filter
+  Γ£ÿ  2 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:289:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 2: CTC Filter (2.3s)
+Status: failed - Test 
+failed: Flow 3: 
+Application Process with 
+ATS Recommendation
+  Γ£ÿ  3 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:295:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 3: Application Process with ATS Recommendation (2.3s)
+Status: failed - Test 
+failed: Flow 4: Debarment 
+State (Profile Locked)
+  Γ£ÿ  4 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:316:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 4: Debarment State (Profile Locked) (2.3s)
+
+
+  1) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:274:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 1: Filter Jobs by Search and Branch 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:4173/login
+    Call log:
+    [2m  - navigating to "http://127.0.0.1:4173/login", waiting until "load"[22m
+
+
+      264 |   test.beforeEach(async ({ page }) => {
+      265 |     // Login as student
+    > 266 |     await page.goto(`${BASE_URL}/login`);
+          |                ^
+      267 |     await page.fill('input[type="email"]', 's0_12@example.com');
+      268 |     await page.fill('input[type="password"]', 'Password@123');
+      269 |     await page.click('button[type="submit"]');
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:266:16
+
+  2) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:289:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 2: CTC Filter 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:4173/login
+    Call log:
+    [2m  - navigating to "http://127.0.0.1:4173/login", waiting until "load"[22m
+
+
+      264 |   test.beforeEach(async ({ page }) => {
+      265 |     // Login as student
+    > 266 |     await page.goto(`${BASE_URL}/login`);
+          |                ^
+      267 |     await page.fill('input[type="email"]', 's0_12@example.com');
+      268 |     await page.fill('input[type="password"]', 'Password@123');
+      269 |     await page.click('button[type="submit"]');
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:266:16
+
+  3) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:295:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 3: Application Process with ATS Recommendation 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:4173/login
+    Call log:
+    [2m  - navigating to "http://127.0.0.1:4173/login", waiting until "load"[22m
+
+
+      264 |   test.beforeEach(async ({ page }) => {
+      265 |     // Login as student
+    > 266 |     await page.goto(`${BASE_URL}/login`);
+          |                ^
+      267 |     await page.fill('input[type="email"]', 's0_12@example.com');
+      268 |     await page.fill('input[type="password"]', 'Password@123');
+      269 |     await page.click('button[type="submit"]');
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:266:16
+
+  4) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:316:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 4: Debarment State (Profile Locked) 
+
+    Error: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:4173/login
+    Call log:
+    [2m  - navigating to "http://127.0.0.1:4173/login", waiting until "load"[22m
+
+
+      264 |   test.beforeEach(async ({ page }) => {
+      265 |     // Login as student
+    > 266 |     await page.goto(`${BASE_URL}/login`);
+          |                ^
+      267 |     await page.fill('input[type="email"]', 's0_12@example.com');
+      268 |     await page.fill('input[type="password"]', 'Password@123');
+      269 |     await page.click('button[type="submit"]');
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:266:16
+
+  4 failed
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:274:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 1: Filter Jobs by Search and Branch 
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:289:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 2: CTC Filter 
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:295:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 3: Application Process with ATS Recommendation 
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:316:3 ΓÇ║ Module 04: Jobs & Filters UI ΓÇ║ Flow 4: Debarment State (Profile Locked) 

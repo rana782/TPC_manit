@@ -1,0 +1,4 @@
+prisma/seed.ts(50,25): error TS2353: Object literal may only specify known properties, and 'title' does not exist in type 'JobCreateManyInput'.
+prisma/seed.ts(58,25): error TS2353: Object literal may only specify known properties, and 'title' does not exist in type 'JobCreateManyInput'.
+src/routes/seed.routes.ts(47,21): error TS2353: Object literal may only specify known properties, and 'title' does not exist in type 'Without<JobCreateInput, JobUncheckedCreateInput> & JobUncheckedCreateInput'.
+src/tests/ats.test.ts(112,21): error TS2353: Object literal may only specify known properties, and 'title' does not exist in type 'Without<JobCreateInput, JobUncheckedCreateInput> & JobUncheckedCreateInput'.

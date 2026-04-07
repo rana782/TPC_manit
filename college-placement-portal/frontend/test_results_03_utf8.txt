@@ -1,0 +1,136 @@
+﻿
+Running 5 tests using 1 worker
+
+  Γ£ÿ  1 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:164:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 1: Build Full Profile (Personal & Academic) (7.6s)
+  Γ£ÿ  2 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:185:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 2: Coding Profiles & Social Links (6.1s)
+  Γ£ÿ  3 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:195:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 3: Internships & Certifications (5.9s)
+  Γ£ÿ  4 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:217:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 4: Document Uploads & Masking Checks (6.0s)
+  Γ£ÿ  5 [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:234:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 5: Resume Manager (Valid vs Invalid) (5.7s)
+
+
+  1) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:164:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 1: Build Full Profile (Personal & Academic) 
+
+    Error: [2mexpect([22m[31mpage[39m[2m).[22mtoHaveURL[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Expected pattern: [32m/.*dashboard/[39m
+    Received string:  [31m"http://localhost:3000/login"[39m
+    Timeout: 5000ms
+
+    Call log:
+    [2m  - Expect "toHaveURL" with timeout 5000ms[22m
+    [2m    9 ├ù unexpected value "http://localhost:3000/login"[22m
+
+
+      159 |     await page.fill('input[type="password"]', 'Password@123');
+      160 |     await page.click('button[type="submit"]');
+    > 161 |     await expect(page).toHaveURL(/.*dashboard/);
+          |                        ^
+      162 |   });
+      163 |
+      164 |   test('Flow 1: Build Full Profile (Personal & Academic)', async ({ page }) => {
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:161:24
+
+    Error Context: test-results\ui_verification_suite-Modu-2171e--Profile-Personal-Academic--chromium\error-context.md
+
+  2) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:185:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 2: Coding Profiles & Social Links 
+
+    Error: [2mexpect([22m[31mpage[39m[2m).[22mtoHaveURL[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Expected pattern: [32m/.*dashboard/[39m
+    Received string:  [31m"http://localhost:3000/login"[39m
+    Timeout: 5000ms
+
+    Call log:
+    [2m  - Expect "toHaveURL" with timeout 5000ms[22m
+    [2m    9 ├ù unexpected value "http://localhost:3000/login"[22m
+
+
+      159 |     await page.fill('input[type="password"]', 'Password@123');
+      160 |     await page.click('button[type="submit"]');
+    > 161 |     await expect(page).toHaveURL(/.*dashboard/);
+          |                        ^
+      162 |   });
+      163 |
+      164 |   test('Flow 1: Build Full Profile (Personal & Academic)', async ({ page }) => {
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:161:24
+
+    Error Context: test-results\ui_verification_suite-Modu-3f38a-oding-Profiles-Social-Links-chromium\error-context.md
+
+  3) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:195:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 3: Internships & Certifications 
+
+    Error: [2mexpect([22m[31mpage[39m[2m).[22mtoHaveURL[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Expected pattern: [32m/.*dashboard/[39m
+    Received string:  [31m"http://localhost:3000/login"[39m
+    Timeout: 5000ms
+
+    Call log:
+    [2m  - Expect "toHaveURL" with timeout 5000ms[22m
+    [2m    9 ├ù unexpected value "http://localhost:3000/login"[22m
+
+
+      159 |     await page.fill('input[type="password"]', 'Password@123');
+      160 |     await page.click('button[type="submit"]');
+    > 161 |     await expect(page).toHaveURL(/.*dashboard/);
+          |                        ^
+      162 |   });
+      163 |
+      164 |   test('Flow 1: Build Full Profile (Personal & Academic)', async ({ page }) => {
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:161:24
+
+    Error Context: test-results\ui_verification_suite-Modu-7ac83--Internships-Certifications-chromium\error-context.md
+
+  4) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:217:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 4: Document Uploads & Masking Checks 
+
+    Error: [2mexpect([22m[31mpage[39m[2m).[22mtoHaveURL[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Expected pattern: [32m/.*dashboard/[39m
+    Received string:  [31m"http://localhost:3000/login"[39m
+    Timeout: 5000ms
+
+    Call log:
+    [2m  - Expect "toHaveURL" with timeout 5000ms[22m
+    [2m    9 ├ù unexpected value "http://localhost:3000/login"[22m
+
+
+      159 |     await page.fill('input[type="password"]', 'Password@123');
+      160 |     await page.click('button[type="submit"]');
+    > 161 |     await expect(page).toHaveURL(/.*dashboard/);
+          |                        ^
+      162 |   });
+      163 |
+      164 |   test('Flow 1: Build Full Profile (Personal & Academic)', async ({ page }) => {
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:161:24
+
+    Error Context: test-results\ui_verification_suite-Modu-d3a4d-ment-Uploads-Masking-Checks-chromium\error-context.md
+
+  5) [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:234:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 5: Resume Manager (Valid vs Invalid) 
+
+    Error: [2mexpect([22m[31mpage[39m[2m).[22mtoHaveURL[2m([22m[32mexpected[39m[2m)[22m failed
+
+    Expected pattern: [32m/.*dashboard/[39m
+    Received string:  [31m"http://localhost:3000/login"[39m
+    Timeout: 5000ms
+
+    Call log:
+    [2m  - Expect "toHaveURL" with timeout 5000ms[22m
+    [2m    9 ├ù unexpected value "http://localhost:3000/login"[22m
+
+
+      159 |     await page.fill('input[type="password"]', 'Password@123');
+      160 |     await page.click('button[type="submit"]');
+    > 161 |     await expect(page).toHaveURL(/.*dashboard/);
+          |                        ^
+      162 |   });
+      163 |
+      164 |   test('Flow 1: Build Full Profile (Personal & Academic)', async ({ page }) => {
+        at C:\Users\RANA\Desktop\college-placement-portal\college-placement-portal\frontend\ui-tests\ui_verification_suite.spec.ts:161:24
+
+    Error Context: test-results\ui_verification_suite-Modu-e1705-e-Manager-Valid-vs-Invalid--chromium\error-context.md
+
+  5 failed
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:164:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 1: Build Full Profile (Personal & Academic) 
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:185:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 2: Coding Profiles & Social Links 
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:195:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 3: Internships & Certifications 
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:217:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 4: Document Uploads & Masking Checks 
+    [chromium] ΓÇ║ ui-tests\ui_verification_suite.spec.ts:234:3 ΓÇ║ Module 03: Student Profile UI ΓÇ║ Flow 5: Resume Manager (Valid vs Invalid) 

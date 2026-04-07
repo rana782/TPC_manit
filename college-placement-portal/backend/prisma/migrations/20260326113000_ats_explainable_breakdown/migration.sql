@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "JobApplication"
+ADD COLUMN "semanticScore" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN "skillScore" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN "skillsMatched" TEXT DEFAULT '[]',
+ADD COLUMN "skillsMissing" TEXT DEFAULT '[]';

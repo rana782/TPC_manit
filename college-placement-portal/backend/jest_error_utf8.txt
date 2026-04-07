@@ -1,0 +1,380 @@
+﻿node.exe : FAIL src/te
+sts/analytics.test.ts 
+(12.021 s)
+At line:1 char:1
++ & "C:\Program Files\
+nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo    
+          : 
+NotSpecified: (F    
+AIL src/tests/...t.ts 
+    (12.021 
+s):String) [    ], 
+RemoteException
+    + 
+FullyQualifiedError   
+ Id : 
+NativeCommandErr    or
+ 
+  ΓùÅ Module 12: 
+Analytics, Alumni, 
+and ATS ΓÇ║ should 
+fetch dashboard 
+summary metrics
+
+    PrismaClientInitia
+lizationError: 
+    Invalid `prisma.us
+er.findUnique()` 
+invocation in
+    C:\Users\RANA\Desk
+top\college-placement-
+portal\college-placeme
+nt-portal\backend\src\
+tests\analytics.test.t
+s:11:35
+
+       8 
+beforeAll(async () => 
+{
+       9     // Basic 
+setup: create/find a 
+coordinator admin for 
+tokens
+      10     const 
+email = 'analytics_adm
+in@test.com';
+    ΓåÆ 11     let 
+admin = await prisma.u
+ser.findUnique(
+    Can't reach 
+database server at 
+`localhost:5433`
+
+    Please make sure 
+your database server 
+is running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError 
+(node_modules/@prisma/
+client/runtime/library
+.js:121:7615)
+      at $n.handleAndL
+ogRequestError (node_m
+odules/@prisma/client/
+runtime/library.js:121
+:6623)
+      at $n.request (n
+ode_modules/@prisma/cl
+ient/runtime/library.j
+s:121:6307)
+      at l (node_modul
+es/@prisma/client/runt
+ime/library.js:130:963
+3)
+
+  ΓùÅ Module 12: 
+Analytics, Alumni, 
+and ATS ΓÇ║ should 
+fetch branch 
+comparison
+
+    PrismaClientInitia
+lizationError: 
+    Invalid `prisma.us
+er.findUnique()` 
+invocation in
+    C:\Users\RANA\Desk
+top\college-placement-
+portal\college-placeme
+nt-portal\backend\src\
+tests\analytics.test.t
+s:11:35
+
+       8 
+beforeAll(async () => 
+{
+       9     // Basic 
+setup: create/find a 
+coordinator admin for 
+tokens
+      10     const 
+email = 'analytics_adm
+in@test.com';
+    ΓåÆ 11     let 
+admin = await prisma.u
+ser.findUnique(
+    Can't reach 
+database server at 
+`localhost:5433`
+
+    Please make sure 
+your database server 
+is running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError 
+(node_modules/@prisma/
+client/runtime/library
+.js:121:7615)
+      at $n.handleAndL
+ogRequestError (node_m
+odules/@prisma/client/
+runtime/library.js:121
+:6623)
+      at $n.request (n
+ode_modules/@prisma/cl
+ient/runtime/library.j
+s:121:6307)
+      at l (node_modul
+es/@prisma/client/runt
+ime/library.js:130:963
+3)
+
+  ΓùÅ Module 12: 
+Analytics, Alumni, 
+and ATS ΓÇ║ should 
+fetch ATS config
+
+    PrismaClientInitia
+lizationError: 
+    Invalid `prisma.us
+er.findUnique()` 
+invocation in
+    C:\Users\RANA\Desk
+top\college-placement-
+portal\college-placeme
+nt-portal\backend\src\
+tests\analytics.test.t
+s:11:35
+
+       8 
+beforeAll(async () => 
+{
+       9     // Basic 
+setup: create/find a 
+coordinator admin for 
+tokens
+      10     const 
+email = 'analytics_adm
+in@test.com';
+    ΓåÆ 11     let 
+admin = await prisma.u
+ser.findUnique(
+    Can't reach 
+database server at 
+`localhost:5433`
+
+    Please make sure 
+your database server 
+is running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError 
+(node_modules/@prisma/
+client/runtime/library
+.js:121:7615)
+      at $n.handleAndL
+ogRequestError (node_m
+odules/@prisma/client/
+runtime/library.js:121
+:6623)
+      at $n.request (n
+ode_modules/@prisma/cl
+ient/runtime/library.j
+s:121:6307)
+      at l (node_modul
+es/@prisma/client/runt
+ime/library.js:130:963
+3)
+
+  ΓùÅ Module 12: 
+Analytics, Alumni, 
+and ATS ΓÇ║ should 
+update ATS config 
+successfully
+
+    PrismaClientInitia
+lizationError: 
+    Invalid `prisma.us
+er.findUnique()` 
+invocation in
+    C:\Users\RANA\Desk
+top\college-placement-
+portal\college-placeme
+nt-portal\backend\src\
+tests\analytics.test.t
+s:11:35
+
+       8 
+beforeAll(async () => 
+{
+       9     // Basic 
+setup: create/find a 
+coordinator admin for 
+tokens
+      10     const 
+email = 'analytics_adm
+in@test.com';
+    ΓåÆ 11     let 
+admin = await prisma.u
+ser.findUnique(
+    Can't reach 
+database server at 
+`localhost:5433`
+
+    Please make sure 
+your database server 
+is running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError 
+(node_modules/@prisma/
+client/runtime/library
+.js:121:7615)
+      at $n.handleAndL
+ogRequestError (node_m
+odules/@prisma/client/
+runtime/library.js:121
+:6623)
+      at $n.request (n
+ode_modules/@prisma/cl
+ient/runtime/library.j
+s:121:6307)
+      at l (node_modul
+es/@prisma/client/runt
+ime/library.js:130:963
+3)
+
+  ΓùÅ Module 12: 
+Analytics, Alumni, 
+and ATS ΓÇ║ should 
+reject invalid ATS 
+config weights that 
+do not sum to 1.0
+
+    PrismaClientInitia
+lizationError: 
+    Invalid `prisma.us
+er.findUnique()` 
+invocation in
+    C:\Users\RANA\Desk
+top\college-placement-
+portal\college-placeme
+nt-portal\backend\src\
+tests\analytics.test.t
+s:11:35
+
+       8 
+beforeAll(async () => 
+{
+       9     // Basic 
+setup: create/find a 
+coordinator admin for 
+tokens
+      10     const 
+email = 'analytics_adm
+in@test.com';
+    ΓåÆ 11     let 
+admin = await prisma.u
+ser.findUnique(
+    Can't reach 
+database server at 
+`localhost:5433`
+
+    Please make sure 
+your database server 
+is running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError 
+(node_modules/@prisma/
+client/runtime/library
+.js:121:7615)
+      at $n.handleAndL
+ogRequestError (node_m
+odules/@prisma/client/
+runtime/library.js:121
+:6623)
+      at $n.request (n
+ode_modules/@prisma/cl
+ient/runtime/library.j
+s:121:6307)
+      at l (node_modul
+es/@prisma/client/runt
+ime/library.js:130:963
+3)
+
+
+  ΓùÅ Test suite 
+failed to run
+
+    PrismaClientInitia
+lizationError: 
+    Invalid `prisma.us
+er.deleteMany()` 
+invocation in
+    C:\Users\RANA\Desk
+top\college-placement-
+portal\college-placeme
+nt-portal\backend\src\
+tests\analytics.test.t
+s:26:23
+
+      23 });
+      24 
+      25 
+afterAll(async () => {
+    ΓåÆ 26     await p
+risma.user.deleteMany(
+    Can't reach 
+database server at 
+`localhost:5433`
+
+    Please make sure 
+your database server 
+is running at 
+`localhost:5433`.
+
+      at 
+$n.handleRequestError 
+(node_modules/@prisma/
+client/runtime/library
+.js:121:7615)
+      at $n.handleAndL
+ogRequestError (node_m
+odules/@prisma/client/
+runtime/library.js:121
+:6623)
+      at $n.request (n
+ode_modules/@prisma/cl
+ient/runtime/library.j
+s:121:6307)
+      at l (node_modul
+es/@prisma/client/runt
+ime/library.js:130:963
+3)
+
+Test Suites: 1 
+failed, 1 total
+Tests:       5 
+failed, 5 total
+Snapshots:   0 total
+Time:        12.09 s, 
+estimated 13 s
+Ran all test suites 
+matching /src\\tests\\
+analytics.test.ts/i.

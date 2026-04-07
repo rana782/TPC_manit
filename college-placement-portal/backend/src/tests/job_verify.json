@@ -1,0 +1,184 @@
+{
+	"info": {
+		"_postman_id": "job_verify_05",
+		"name": "Module 05 Verification (Job Posting)",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Login Verified SPOC",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var jsonData = pm.response.json();",
+							"pm.environment.set(\"token\", jsonData.token);"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"email\": \"spoc_verify_05@example.com\",\n    \"password\": \"Password@123\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:5000/api/auth/login",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"auth",
+						"login"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Create Job",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var jsonData = pm.response.json();",
+							"pm.test(\"Status code is 201\", function () { pm.response.to.have.status(201); });",
+							"pm.test(\"Success is true\", function () { pm.expect(jsonData.success).to.be.true; });",
+							"pm.environment.set(\"jobId\", jsonData.job.id);"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"role\": \"Software Engineer\",\n    \"companyName\": \"TestCorp\",\n    \"description\": \"Build amazing things with React and Node.js.\",\n    \"jobType\": \"Full-Time\",\n    \"ctc\": \"12 LPA\",\n    \"cgpaMin\": 7.5,\n    \"status\": \"PUBLISHED\",\n    \"applicationDeadline\": \"2026-12-31T23:59:59Z\",\n    \"eligibleBranches\": \"[\\\"CSE\\\", \\\"IT\\\"]\",\n    \"requiredProfileFields\": \"[\\\"resume\\\", \\\"cgpa\\\"]\",\n    \"customQuestions\": \"[{\\\"label\\\": \\\"Why us?\\\", \\\"type\\\": \\\"text\\\", \\\"required\\\": true}]\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:5000/api/jobs",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"jobs"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Job Details",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"var jsonData = pm.response.json();",
+							"pm.test(\"Status code is 200\", function () { pm.response.to.have.status(200); });",
+							"pm.test(\"Role matches\", function () { pm.expect(jsonData.job.role).to.eql(\"Software Engineer\"); });",
+							"pm.test(\"Eligible branches persisted\", function () { pm.expect(jsonData.job.eligibleBranches).to.include(\"CSE\"); });"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:5000/api/jobs/{{jobId}}",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"jobs",
+						"{{jobId}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Export Applicants (CSV)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status is 200 or 400 (if no apps)\", function () { pm.expect([200, 400]).to.include(pm.response.code); });",
+							"if (pm.response.code === 200) {",
+							"    pm.test(\"Content-Type is csv\", function () { pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv'); });",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer {{token}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "http://localhost:5000/api/jobs/{{jobId}}/applicants/csv",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "5000",
+					"path": [
+						"api",
+						"jobs",
+						"{{jobId}}",
+						"applicants",
+						"csv"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

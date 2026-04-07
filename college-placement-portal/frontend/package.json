@@ -1,0 +1,36 @@
+{
+    "name": "placement-frontend",
+    "private": true,
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview",
+        "typecheck": "tsc --noEmit",
+        "test": "echo \"No frontend unit tests configured - typecheck only\" && npx tsc --noEmit"
+    },
+    "dependencies": {
+        "axios": "^1.5.0",
+        "clsx": "^2.1.1",
+        "framer-motion": "^12.35.2",
+        "lucide-react": "^0.577.0",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "react-router-dom": "^6.15.0",
+        "recharts": "^2.12.7",
+        "tailwind-merge": "^3.5.0"
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.58.2",
+        "@types/node": "^25.3.5",
+        "@types/react": "^18.2.15",
+        "@types/react-dom": "^18.2.7",
+        "@vitejs/plugin-react": "^4.0.3",
+        "autoprefixer": "^10.4.27",
+        "postcss": "^8.5.8",
+        "tailwindcss": "^3.4.19",
+        "typescript": "^5.0.2",
+        "vite": "^4.4.5"
+    }
+}

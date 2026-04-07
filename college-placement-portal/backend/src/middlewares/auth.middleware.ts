@@ -1,0 +1,71 @@
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { PrismaClient } from '@prisma/client';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
+const prisma = new PrismaClient();
+
+export interface AuthRequest extends Request {
+    user?: {
+        id: string;
+        email: string;
+        role: string;
+        isVerified?: boolean;
+        permJobCreate?: boolean;
+        permLockProfile?: boolean;
+        permExportCsv?: boolean;
+    };
+}
+
+export const verifyToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, message: 'No token provided' });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET) as any;
+
+        // Check if user account has been disabled
+        const user = await prisma.user.findUnique({
+            where: { id: decoded.id },
+            select: {
+                id: true, email: true, role: true, isDisabled: true,
+                isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
+            }
+        });
+
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'User not found' });
+        }
+
+        if (user.isDisabled) {
+            return res.status(403).json({ success: false, message: 'Account has been disabled. Please contact your coordinator.' });
+        }
+
+        req.user = {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+            isVerified: user.isVerified,
+            permJobCreate: user.permJobCreate,
+            permLockProfile: user.permLockProfile,
+            permExportCsv: user.permExportCsv
+        };
+        next();
+    } catch (error) {
+        return res.status(401).json({ success: false, message: 'Invalid token' });
+    }
+};
+
+export const requireRole = (roles: string[]) => {
+    return (req: AuthRequest, res: Response, next: NextFunction) => {
+        if (!req.user || !roles.includes(req.user.role)) {
+            return res.status(403).json({ success: false, message: 'Forbidden: Insufficient role' });
+        }
+        next();
+    };
+};

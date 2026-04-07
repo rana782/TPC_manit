@@ -1,0 +1,67 @@
+﻿
+> placement-backend@1.0.0 dev
+> ts-node-dev --respawn --transpile-only src/server.ts
+
+[INFO] 00:15:13 ts-node-dev ver. 2.0.0 (using ts-node ver. 10.9.2, typescript ver. 5.9.3)
+node.exe : Error: listen 
+EADDRINUSE: address 
+already in use :::5000
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (E  
+  rror: listen E... in    
+ use :::5000:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+    at 
+Server.setupListenHandle 
+[as _listen2] 
+(node:net:1940:16)
+    at listenInCluster 
+(node:net:1997:12)
+    at Server.listen 
+(node:net:2102:7)
+    at Function.listen (C:
+\Users\RANA\Desktop\colleg
+e-placement-portal\college
+-placement-portal\backend\
+node_modules\express\lib\a
+pplication.js:635:24)
+    at Object.<anonymous> 
+(C:\Users\RANA\Desktop\col
+lege-placement-portal\coll
+ege-placement-portal\backe
+nd\src\server.ts:9:5)
+    at Module.<anonymous> 
+(node:internal/modules/cjs
+/loader:1706:14)
+    at Module._compile (C:
+\Users\RANA\Desktop\colleg
+e-placement-portal\college
+-placement-portal\backend\
+node_modules\source-map-su
+pport\source-map-support.j
+s:521:25)
+    at Module.m._compile (
+C:\Users\RANA\AppData\Loca
+l\Temp\ts-node-dev-hook-36
+370141109007337.js:69:33)
+    at node:internal/modul
+es/cjs/loader:1839:10
+    at require.extensions.
+.jsx.require.extensions..j
+s (C:\Users\RANA\AppData\L
+ocal\Temp\ts-node-dev-hook
+-36370141109007337.js:114:
+20)
+[ERROR] 00:15:16 Error: listen EADDRINUSE: address already in use :::5000

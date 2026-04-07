@@ -1,0 +1,67 @@
+﻿node.exe : file:///C:/User
+s/RANA/AppData/Local/npm-c
+ache/_npx/aab42732f01924e5
+/node_modules/serve/build/
+main.js:377
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (f  
+  ile:///C:/User...ild/   
+ main.js:377:String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+      throw new Error(
+            ^
+
+Error: Unknown --listen 
+endpoint scheme 
+(protocol): 127.0.0.1:
+    at parseEndpoint (file
+:///C:/Users/RANA/AppData/
+Local/npm-cache/_npx/aab42
+732f01924e5/node_modules/s
+erve/build/main.js:377:13)
+    at type (C:\Users\RANA
+\AppData\Local\npm-cache\_
+npx\aab42732f01924e5\node_
+modules\arg\index.js:70:15
+)
+    at arg (C:\Users\RANA\
+AppData\Local\npm-cache\_n
+px\aab42732f01924e5\node_m
+odules\arg\index.js:170:24
+)
+    at parseArguments (fil
+e:///C:/Users/RANA/AppData
+/Local/npm-cache/_npx/aab4
+2732f01924e5/node_modules/
+serve/build/main.js:414:28
+)
+    at file:///C:/Users/RA
+NA/AppData/Local/npm-cache
+/_npx/aab42732f01924e5/nod
+e_modules/serve/build/main
+.js:503:40
+    at ModuleJob.run (node
+:internal/modules/esm/modu
+le_job:345:25)
+    at async onImport.trac
+ePromise.__proto__ (node:i
+nternal/modules/esm/loader
+:651:26)
+    at async asyncRunEntry
+PointWithESMLoader (node:i
+nternal/modules/run_main:1
+17:5)
+
+Node.js v22.19.0
