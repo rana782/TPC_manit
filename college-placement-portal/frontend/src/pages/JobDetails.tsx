@@ -5,11 +5,12 @@ import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import { parseLookupRating, parseLookupReviews } from '../utils/parseCompanyLookup';
-import { getViteApiBase } from '../utils/apiBase';
+import { getViteApiBase, getViteApiOrigin } from '../utils/apiBase';
 import {
     ArrowLeft, Calendar, Users, Plus, Search, ArrowUpDown,
     CheckCircle2, Clock, AlertCircle, X, Award, Sparkles, Shield,
-    ChevronRight, ChevronDown, ChevronUp, User, FileText, Lock, Unlock, GraduationCap, UserMinus, Upload
+    ChevronRight, ChevronDown, ChevronUp, User, FileText, Lock, Unlock, GraduationCap, UserMinus, Upload, MessageSquare,
+    Pencil, Trash2
 } from 'lucide-react';
 
 interface JobApplication {
@@ -45,6 +46,9 @@ interface JobStage {
     scheduledDate: string;
     status: string;
     shortlistDocPath?: string | null;
+    notes?: string | null;
+    attachmentPath?: string | null;
+    createdAt?: string;
 }
 
 /** From API — job-specific timeline; column titles must use `name` only (no default pipeline labels). */
@@ -55,6 +59,8 @@ interface TimelineStage {
     scheduledDate?: string;
     status?: string;
     shortlistDocPath?: string | null;
+    notes?: string | null;
+    attachmentPath?: string | null;
 }
 
 interface Job {
@@ -82,19 +88,66 @@ function parseJsonArray(value: unknown): string[] {
     }
 }
 
-function getOrderedTimelineStages(job: Job): TimelineStage[] {
-    if (job.timelineStages && job.timelineStages.length > 0) {
-        return [...job.timelineStages].sort((a, b) => a.order - b.order);
+/** Backend serves `/uploads/...` from API origin (not under `/api`). */
+function stageUploadUrl(path: string | null | undefined): string {
+    if (!path) return '#';
+    if (path.startsWith('http')) return path;
+    const o = getViteApiOrigin();
+    return o ? `${o}${path}` : path;
+}
+
+function toDateInputValue(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+/** Earliest calendar day allowed for a new/edited stage: max(today, day after application deadline). */
+function minStageDateInputValue(job: Job | null): string {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (!job?.applicationDeadline) {
+        return toDateInputValue(today.toISOString());
     }
-    const stages = [...(job.stages || [])].sort(
-        (a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime()
-    );
+    const dl = new Date(job.applicationDeadline);
+    dl.setHours(0, 0, 0, 0);
+    const dayAfterDeadline = new Date(dl);
+    dayAfterDeadline.setDate(dayAfterDeadline.getDate() + 1);
+    const min = new Date(Math.max(today.getTime(), dayAfterDeadline.getTime()));
+    return toDateInputValue(min.toISOString());
+}
+
+/** Edit form: allow keeping an older scheduled date; new picks must still respect the floor. */
+function minStageDateInputForEdit(job: Job | null, currentValue: string): string {
+    const floor = minStageDateInputValue(job);
+    if (!currentValue) return floor;
+    return currentValue < floor ? currentValue : floor;
+}
+
+function compareStagesOrder(a: JobStage, b: JobStage): number {
+    const ta = new Date(a.scheduledDate).getTime();
+    const tb = new Date(b.scheduledDate).getTime();
+    if (ta !== tb) return ta - tb;
+    const ca = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const cb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return ca - cb;
+}
+
+/** Must match backend `STAGE_ORDER_BY` (scheduledDate, createdAt) — do not use API `timelineStages.order` alone or indices diverge from `currentStageIndex`. */
+function getOrderedTimelineStages(job: Job): TimelineStage[] {
+    const stages = [...(job.stages || [])].sort(compareStagesOrder);
     return stages.map((s, i) => ({
         id: s.id,
         name: s.name,
         order: i + 1,
         scheduledDate: s.scheduledDate,
-        status: s.status
+        status: s.status,
+        shortlistDocPath: s.shortlistDocPath ?? null,
+        notes: s.notes ?? null,
+        attachmentPath: s.attachmentPath ?? null
     }));
 }
 
@@ -133,6 +186,10 @@ export default function JobDetails() {
 
     const [stageName, setStageName] = useState('');
     const [stageDate, setStageDate] = useState('');
+    const [stageNotes, setStageNotes] = useState('');
+    const [stageFile, setStageFile] = useState<File | null>(null);
+    const [stageFileResetKey, setStageFileResetKey] = useState(0);
+    const [addStageLoading, setAddStageLoading] = useState(false);
     const [stageDateError, setStageDateError] = useState('');
     const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
     const [searchApplicant, setSearchApplicant] = useState('');
@@ -155,9 +212,20 @@ export default function JobDetails() {
     /** Expanded timeline stage panels (default: all collapsed — stage name only until opened). */
     const [expandedStageIds, setExpandedStageIds] = useState<Record<string, boolean>>({});
     const [rowActionLoading, setRowActionLoading] = useState<string | null>(null);
-    const [stageUploadLoading, setStageUploadLoading] = useState<string | null>(null);
-    const [shortlistMapLoading, setShortlistMapLoading] = useState<string | null>(null);
     const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
+
+    const [editingStage, setEditingStage] = useState<JobStage | null>(null);
+    const [editStageName, setEditStageName] = useState('');
+    const [editStageDate, setEditStageDate] = useState('');
+    const [editStageNotes, setEditStageNotes] = useState('');
+    const [editStageStatus, setEditStageStatus] = useState('PENDING');
+    const [editStageFile, setEditStageFile] = useState<File | null>(null);
+    const [editClearAttachment, setEditClearAttachment] = useState(false);
+    const [editFileResetKey, setEditFileResetKey] = useState(0);
+    const [editStageLoading, setEditStageLoading] = useState(false);
+    const [editStageError, setEditStageError] = useState('');
+    const [stageDeleteConfirm, setStageDeleteConfirm] = useState<JobStage | null>(null);
+    const [deleteStageLoading, setDeleteStageLoading] = useState(false);
 
     const apiBase = getViteApiBase();
     const token = localStorage.getItem('token');
@@ -205,38 +273,106 @@ export default function JobDetails() {
         e.preventDefault();
         setStageDateError('');
         if (!job) return;
-        const deadline = job.applicationDeadline ? new Date(job.applicationDeadline) : null;
-        const newStageDate = new Date(stageDate);
-        if (deadline) {
-            deadline.setHours(0, 0, 0, 0);
-            newStageDate.setHours(0, 0, 0, 0);
-            if (newStageDate <= deadline) {
-                setStageDateError('Timeline stages must occur sequentially and after application deadline');
-                return;
-            }
-        }
-        const existingStages = (job.stages || []).slice().sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
-        if (existingStages.length > 0) {
-            const lastDate = new Date(existingStages[existingStages.length - 1].scheduledDate);
-            lastDate.setHours(0, 0, 0, 0);
-            newStageDate.setHours(0, 0, 0, 0);
-            if (newStageDate <= lastDate) {
-                setStageDateError('Timeline stages must occur sequentially and after application deadline');
-                return;
-            }
+        const minStr = minStageDateInputValue(job);
+        if (stageDate < minStr) {
+            setStageDateError('Stage date must be today or later and after the application deadline');
+            return;
         }
         try {
-            await axios.patch(`${apiBase}/jobs/${id}/stage`, {
-                name: stageName,
-                scheduledDate: stageDate
-            }, { headers: { Authorization: `Bearer ${token}` } });
+            setAddStageLoading(true);
+            const form = new FormData();
+            form.append('name', stageName.trim());
+            form.append('scheduledDate', stageDate);
+            if (stageNotes.trim()) {
+                form.append('notes', stageNotes.trim());
+            }
+            if (stageFile) {
+                form.append('stageAttachment', stageFile);
+            }
+            await axios.patch(`${apiBase}/jobs/${id}/stage`, form, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
             setStageName('');
             setStageDate('');
+            setStageNotes('');
+            setStageFile(null);
+            setStageFileResetKey((k) => k + 1);
             setStageDateError('');
             fetchJob();
         } catch (err: any) {
             const msg = err.response?.data?.message || 'Failed to add stage';
-            setStageDateError(msg.includes('Timeline') ? msg : 'Failed to add stage');
+            setStageDateError(
+                /deadline|today|Stage date|Stage scheduled/i.test(msg) ? msg : 'Failed to add stage'
+            );
+        } finally {
+            setAddStageLoading(false);
+        }
+    };
+
+    const openEditStage = (stage: JobStage) => {
+        setEditingStage(stage);
+        setEditStageName(stage.name);
+        setEditStageDate(toDateInputValue(stage.scheduledDate));
+        setEditStageNotes(stage.notes || '');
+        setEditStageStatus(stage.status || 'PENDING');
+        setEditStageFile(null);
+        setEditClearAttachment(false);
+        setEditFileResetKey((k) => k + 1);
+        setEditStageError('');
+    };
+
+    const submitEditStage = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingStage || !id || !token || !job) return;
+        const minStr = minStageDateInputValue(job);
+        const origDate = toDateInputValue(editingStage.scheduledDate);
+        if (editStageDate !== origDate && editStageDate < minStr) {
+            setEditStageError('Stage date must be today or later and after the application deadline');
+            return;
+        }
+        setEditStageLoading(true);
+        setEditStageError('');
+        try {
+            const form = new FormData();
+            form.append('name', editStageName.trim());
+            form.append('scheduledDate', editStageDate);
+            form.append('notes', editStageNotes.trim());
+            form.append('status', editStageStatus);
+            if (editClearAttachment) {
+                form.append('clearAttachment', 'true');
+            }
+            if (editStageFile) {
+                form.append('stageAttachment', editStageFile);
+            }
+            await axios.patch(`${apiBase}/jobs/${id}/stages/${editingStage.id}`, form, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setEditingStage(null);
+            fetchJob();
+        } catch (err: any) {
+            const msg = err.response?.data?.message || 'Failed to update stage';
+            setEditStageError(/deadline|today|Stage date|Stage scheduled/i.test(msg) ? msg : 'Failed to update stage');
+        } finally {
+            setEditStageLoading(false);
+        }
+    };
+
+    const confirmDeleteStage = async () => {
+        if (!stageDeleteConfirm || !id || !token) return;
+        setDeleteStageLoading(true);
+        setBulkActionError('');
+        try {
+            const sid = stageDeleteConfirm.id;
+            await axios.delete(`${apiBase}/jobs/${id}/stages/${sid}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setStageDeleteConfirm(null);
+            if (selectedStageId === sid) setSelectedStageId(null);
+            fetchJob();
+        } catch (err: any) {
+            setBulkActionError(err.response?.data?.message || 'Failed to delete stage');
+        } finally {
+            setDeleteStageLoading(false);
         }
     };
 
@@ -334,52 +470,6 @@ export default function JobDetails() {
         }
     };
 
-    const uploadStageShortlistDoc = async (stageId: string, file: File | null) => {
-        if (!id || !file || !token) return;
-        setBulkActionError('');
-        setStageUploadLoading(stageId);
-        try {
-            const form = new FormData();
-            form.append('shortlistDoc', file);
-            await axios.patch(`${apiBase}/jobs/${id}/stages/${stageId}/shortlist-doc`, form, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'multipart/form-data'
-                }
-            });
-            await fetchJob();
-        } catch (err: any) {
-            setBulkActionError(err.response?.data?.message || 'Failed to upload shortlist document');
-        } finally {
-            setStageUploadLoading(null);
-        }
-    };
-
-    const uploadStageShortlistAndMap = async (stageId: string, file: File | null) => {
-        if (!id || !file || !token) return;
-        setBulkActionError('');
-        setShortlistMapLoading(stageId);
-        try {
-            const form = new FormData();
-            form.append('shortlistFile', file);
-            const res = await axios.post(`${apiBase}/jobs/${id}/stages/${stageId}/upload-shortlist`, form, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'multipart/form-data'
-                }
-            });
-            setBulkActionMsg(
-                `Shortlist processed. ${res.data?.movedCount || 0} student(s) mapped to selected stage.`
-            );
-            setSelectedStageId(stageId);
-            await fetchJob();
-        } catch (err: any) {
-            setBulkActionError(err.response?.data?.message || 'Failed to process shortlist file');
-        } finally {
-            setShortlistMapLoading(null);
-        }
-    };
-
     const declareResults = async () => {
         if (!window.confirm(`Declare placed for ${selectedStudents.length} selected student(s)?`)) return;
         if (bulkActionLoading) return;
@@ -404,15 +494,6 @@ export default function JobDetails() {
         setSelectedStudents(prev =>
             prev.includes(studentId) ? prev.filter(sid => sid !== studentId) : [...prev, studentId]
         );
-    };
-
-    const selectAll = () => {
-        if (!job) return;
-        const appsToSelect = selectedStageId
-            ? job.applications.filter((a) => a.currentStageId === selectedStageId)
-            : job.applications;
-        const allIds = appsToSelect.map((a) => a.student.id);
-        setSelectedStudents(prev => prev.length === allIds.length ? [] : allIds);
     };
 
     const openLockModal = (studentId: string, isLocked: boolean, e: React.MouseEvent) => {
@@ -511,12 +592,15 @@ export default function JobDetails() {
         ? sortedApps.filter((app) => app.currentStageId === selectedStageId)
         : sortedApps;
 
+    const selectAll = () => {
+        const allIds = filteredApps.map((a) => a.student.id);
+        setSelectedStudents((prev) => (prev.length === allIds.length && allIds.length > 0 ? [] : allIds));
+    };
+
     const orderedTimeline = getOrderedTimelineStages(job);
     const selectedStageObj = selectedStageId ? orderedTimeline.find((s) => s.id === selectedStageId) : null;
     const hasPipelineStages = orderedTimeline.length > 0;
-    const sortedStagesForSidebar = [...(job.stages || [])].sort(
-        (a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime()
-    );
+    const sortedStagesForSidebar = [...(job.stages || [])].sort(compareStagesOrder);
 
     const selectedApps = (job.applications || []).filter((app) => selectedStudents.includes(app.student.id));
     const selectedStageSet = new Set(selectedApps.map((app) => columnIndexForApplicant(app, orderedTimeline)));
@@ -528,16 +612,14 @@ export default function JobDetails() {
         hasPipelineStages &&
         selectedStudents.length > 0 &&
         !hasMixedStageSelection &&
-        selectedStageIndex >= -1 &&
-        selectedStageIndex < finalStageIndex;
+        selectedApps.every((app) => {
+            const idx = columnIndexForApplicant(app, orderedTimeline);
+            return idx >= -1 && idx < finalStageIndex;
+        });
     const anySelectedAlreadyPlaced = selectedApps.some((a) => isPlacedStatus(a.status));
+    /** Declare placed is allowed for applicants in any timeline stage (or mixed stages); still requires a configured pipeline and no already-placed rows in the selection. */
     const canDeclarePlaced =
-        hasPipelineStages &&
-        selectedStudents.length > 0 &&
-        !hasMixedStageSelection &&
-        selectedStageIndex === finalStageIndex &&
-        finalStageIndex >= 0 &&
-        !anySelectedAlreadyPlaced;
+        hasPipelineStages && selectedStudents.length > 0 && selectedApps.length > 0 && !anySelectedAlreadyPlaced;
     const nextStageName = canMoveToNextStage ? orderedTimeline[selectedStageIndex + 1]?.name : '';
 
     /** Stages that have at least one applicant assigned (others are hidden). */
@@ -662,32 +744,42 @@ export default function JobDetails() {
                                     initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
                                     className="mt-4 bg-primary-50 border border-primary-200 rounded-xl px-4 py-3 space-y-2"
                                 >
-                                    <div className="flex items-center justify-between gap-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                         <span className="text-sm font-bold text-primary-700">{selectedStudents.length} student(s) selected</span>
-                                        {canMoveToNextStage && (
-                                            <button
-                                                onClick={() => moveToNextStage(selectedStageIndex + 1)}
-                                                disabled={bulkActionLoading}
-                                                className="inline-flex items-center gap-1.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-all transform active:scale-95"
-                                            >
-                                                <ChevronRight className="w-4 h-4" /> Move to Next Stage ({nextStageName})
-                                            </button>
-                                        )}
-                                        {canDeclarePlaced && (
-                                            <button
-                                                onClick={declareResults}
-                                                disabled={bulkActionLoading}
-                                                className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-all transform active:scale-95"
-                                            >
-                                                <Award className="w-4 h-4" /> Declare Placed
-                                            </button>
-                                        )}
+                                        <div className="flex flex-wrap items-center justify-end gap-2">
+                                            {canMoveToNextStage && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => moveToNextStage(selectedStageIndex + 1)}
+                                                    disabled={bulkActionLoading}
+                                                    className="inline-flex items-center gap-1.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-all transform active:scale-95"
+                                                >
+                                                    <ChevronRight className="w-4 h-4" /> Move to Next Stage ({nextStageName})
+                                                </button>
+                                            )}
+                                            {canDeclarePlaced && (
+                                                <button
+                                                    type="button"
+                                                    onClick={declareResults}
+                                                    disabled={bulkActionLoading}
+                                                    className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-all transform active:scale-95"
+                                                >
+                                                    <Award className="w-4 h-4" /> Declare Placed
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                     {hasMixedStageSelection && (
-                                        <p className="text-xs font-semibold text-amber-700">Selected students are in mixed stages. Select students from the same stage to continue.</p>
+                                        <p className="text-xs font-semibold text-amber-700">
+                                            Selected students are in mixed stages. Move to next stage requires everyone to be in the same stage. You can still declare placed for this selection.
+                                        </p>
                                     )}
-                                    {!hasMixedStageSelection && selectedStudents.length > 0 && !canMoveToNextStage && !canDeclarePlaced && (
-                                        <p className="text-xs font-semibold text-gray-600">No valid progression action available for this selection.</p>
+                                    {selectedStudents.length > 0 && !canMoveToNextStage && !canDeclarePlaced && (
+                                        <p className="text-xs font-semibold text-gray-600">
+                                            {anySelectedAlreadyPlaced
+                                                ? 'Deselect students who are already placed, or use Unplace first.'
+                                                : 'No valid action available for this selection.'}
+                                        </p>
                                     )}
                                     {bulkActionError && <p className="text-xs font-semibold text-red-700">{bulkActionError}</p>}
                                     {bulkActionMsg && <p className="text-xs font-semibold text-emerald-700">{bulkActionMsg}</p>}
@@ -1086,62 +1178,77 @@ export default function JobDetails() {
                                                  <div className="w-2 h-2 bg-gray-300 rounded-full" />}
                                             </div>
                                             {/* Content */}
-                                            <button
-                                                type="button"
-                                                onClick={() => setSelectedStageId(stage.id)}
-                                                className={clsx(
-                                                    "pb-6 flex-1 min-w-0 text-left rounded-md px-1 -mx-1",
-                                                    selectedStageId === stage.id && "bg-primary-50/70 border border-primary-100"
-                                                )}
-                                            >
-                                                <p className={clsx('text-sm font-bold', isCompleted ? 'text-gray-900' : 'text-gray-600')}>{stage.name}</p>
-                                                <p className="text-xs text-gray-500 mt-0.5">
-                                                    {isCompleted ? 'Completed' : isInProgress ? 'In Progress' :
-                                                    new Date(stage.scheduledDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                                </p>
-                                                <div className="mt-2 flex flex-wrap items-center gap-2">
-                                                    <label className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg border border-primary-200 bg-primary-50 text-primary-700 cursor-pointer hover:bg-primary-100">
-                                                        <Upload className="w-3 h-3" />
-                                                        {stageUploadLoading === stage.id ? 'Uploading...' : 'Upload shortlist'}
-                                                        <input
-                                                            type="file"
-                                                            accept="application/pdf,image/*"
-                                                            className="hidden"
-                                                            disabled={stageUploadLoading === stage.id}
-                                                            onChange={(e) => {
-                                                                const f = e.target.files?.[0] || null;
-                                                                uploadStageShortlistDoc(stage.id, f);
-                                                                e.currentTarget.value = '';
-                                                            }}
-                                                        />
-                                                    </label>
-                                                    <label className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 cursor-pointer hover:bg-emerald-100">
-                                                        <Upload className="w-3 h-3" />
-                                                        {shortlistMapLoading === stage.id ? 'Mapping...' : 'Upload shortlist CSV'}
-                                                        <input
-                                                            type="file"
-                                                            accept=".csv,.txt,text/csv,text/plain"
-                                                            className="hidden"
-                                                            disabled={shortlistMapLoading === stage.id}
-                                                            onChange={(e) => {
-                                                                const f = e.target.files?.[0] || null;
-                                                                uploadStageShortlistAndMap(stage.id, f);
-                                                                e.currentTarget.value = '';
-                                                            }}
-                                                        />
-                                                    </label>
-                                                    {stage.shortlistDocPath && (
-                                                        <a
-                                                            href={stage.shortlistDocPath}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="text-[11px] font-bold text-primary-700 hover:underline"
-                                                        >
-                                                            View shortlist file
-                                                        </a>
+                                            <div className="pb-6 flex-1 min-w-0 flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedStageId(stage.id)}
+                                                    className={clsx(
+                                                        'flex-1 min-w-0 text-left rounded-md px-1 -mx-1',
+                                                        selectedStageId === stage.id && 'bg-primary-50/70 border border-primary-100'
                                                     )}
+                                                >
+                                                    <p className={clsx('text-sm font-bold', isCompleted ? 'text-gray-900' : 'text-gray-600')}>{stage.name}</p>
+                                                    <p className="text-xs text-gray-500 mt-0.5">
+                                                        {isCompleted ? 'Completed' : isInProgress ? 'In Progress' :
+                                                        new Date(stage.scheduledDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                                    </p>
+                                                    {stage.notes && (
+                                                        <p className="text-xs text-gray-600 mt-2 whitespace-pre-wrap border-l-2 border-gray-200 pl-2">
+                                                            {stage.notes}
+                                                        </p>
+                                                    )}
+                                                    {(stage.attachmentPath || stage.shortlistDocPath) && (
+                                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                            {stage.attachmentPath && (
+                                                                <a
+                                                                    href={stageUploadUrl(stage.attachmentPath)}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="text-[11px] font-bold text-primary-700 hover:underline inline-flex items-center gap-1"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                >
+                                                                    <FileText className="w-3 h-3" /> View attachment
+                                                                </a>
+                                                            )}
+                                                            {stage.shortlistDocPath && (
+                                                                <a
+                                                                    href={stageUploadUrl(stage.shortlistDocPath)}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="text-[11px] font-bold text-primary-700 hover:underline"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                >
+                                                                    View shortlist file
+                                                                </a>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </button>
+                                                <div className="flex flex-col gap-1 shrink-0 pt-0.5">
+                                                    <button
+                                                        type="button"
+                                                        title="Edit stage"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            openEditStage(stage);
+                                                        }}
+                                                        className="p-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-primary-700 transition-colors"
+                                                    >
+                                                        <Pencil className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        title="Remove stage"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setStageDeleteConfirm(stage);
+                                                        }}
+                                                        className="p-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
                                                 </div>
-                                            </button>
+                                            </div>
                                         </div>
                                     );
                                 })}
@@ -1158,37 +1265,264 @@ export default function JobDetails() {
                                     className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10 focus:outline-none" />
                             </div>
                             <div>
-                                <input type="date" required value={stageDate} onChange={e => { setStageDate(e.target.value); setStageDateError(''); }}
-                                    className={clsx('w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500/10 focus:outline-none', stageDateError ? 'border-red-500' : 'border-gray-200 focus:border-primary-500')} />
+                                <input
+                                    type="date"
+                                    required
+                                    min={job ? minStageDateInputValue(job) : undefined}
+                                    value={stageDate}
+                                    onChange={e => { setStageDate(e.target.value); setStageDateError(''); }}
+                                    className={clsx('w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500/10 focus:outline-none', stageDateError ? 'border-red-500' : 'border-gray-200 focus:border-primary-500')}
+                                />
+                                <p className="text-[11px] text-gray-500 mt-1">
+                                    Must be on or after today and after the application deadline. Stages are shown in date order (same-day order preserved).
+                                </p>
                                 {stageDateError && <p className="text-red-500 text-sm mt-1">{stageDateError}</p>}
                             </div>
-                            <button type="submit" className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-black text-white px-4 py-2.5 rounded-lg text-sm font-bold transition-all transform active:scale-95">
-                                <Plus className="w-4 h-4" /> Add Stage
+                            <div>
+                                <label className="flex items-center gap-1.5 text-xs font-bold text-gray-600 mb-1">
+                                    <MessageSquare className="w-3.5 h-3.5 text-gray-400" /> Comments (optional)
+                                </label>
+                                <textarea
+                                    value={stageNotes}
+                                    onChange={(e) => setStageNotes(e.target.value)}
+                                    placeholder="e.g. Venue, dress code, what to bring..."
+                                    rows={3}
+                                    maxLength={8000}
+                                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10 focus:outline-none resize-y min-h-[72px]"
+                                />
+                                <p className="text-[11px] text-gray-400 mt-0.5">{stageNotes.length}/8000</p>
+                            </div>
+                            <div>
+                                <label className="flex items-center gap-1.5 text-xs font-bold text-gray-600 mb-1">
+                                    <Upload className="w-3.5 h-3.5 text-gray-400" /> Attachment (optional)
+                                </label>
+                                <p className="text-[11px] text-gray-500 mb-1.5">PDF or image, max 5 MB</p>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50">
+                                        <Upload className="w-3.5 h-3.5" /> {stageFile ? stageFile.name : 'Choose file'}
+                                    </span>
+                                    <input
+                                        key={stageFileResetKey}
+                                        type="file"
+                                        accept="application/pdf,image/jpeg,image/png"
+                                        className="hidden"
+                                        onChange={(e) => setStageFile(e.target.files?.[0] ?? null)}
+                                    />
+                                </label>
+                                {stageFile && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setStageFile(null); setStageFileResetKey((k) => k + 1); }}
+                                        className="text-xs text-red-600 font-semibold mt-1 hover:underline"
+                                    >
+                                        Remove file
+                                    </button>
+                                )}
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={addStageLoading}
+                                className="w-full inline-flex items-center justify-center gap-1.5 bg-gray-900 hover:bg-black disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-lg text-sm font-bold transition-all transform active:scale-95"
+                            >
+                                <Plus className="w-4 h-4" /> {addStageLoading ? 'Adding…' : 'Add Stage'}
                             </button>
                         </form>
                     </div>
-
-                    {/* Quick Stats */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4">Quick Stats</h3>
-                        <div className="space-y-3">
-                            {[
-                                { label: 'Total Applicants', value: job.applications?.length || 0, icon: Users, color: 'text-primary-600' },
-                                { label: 'Accepted', value: job.applications?.filter(a => a.status === 'ACCEPTED').length || 0, icon: CheckCircle2, color: 'text-emerald-600' },
-                                { label: 'Avg ATS Score', value: job.applications?.length ? Math.round(job.applications.reduce((s, a) => s + (a.atsScore || 0), 0) / job.applications.length) : 0, icon: Sparkles, color: 'text-violet-600' },
-                                { label: 'Stages', value: job.stages?.length || 0, icon: Calendar, color: 'text-amber-600' },
-                            ].map(stat => (
-                                <div key={stat.label} className="flex items-center justify-between py-2">
-                                    <span className="text-sm text-gray-600 flex items-center gap-2">
-                                        <stat.icon className={`w-4 h-4 ${stat.color}`} /> {stat.label}
-                                    </span>
-                                    <span className="text-sm font-bold text-gray-900">{stat.value}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
                 </div>
             </div>
+
+            {/* === EDIT STAGE MODAL === */}
+            <AnimatePresence>
+                {editingStage && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+                    >
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+                        >
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                    <Pencil className="w-5 h-5 text-primary-600" /> Edit stage
+                                </h3>
+                                <button
+                                    type="button"
+                                    onClick={() => setEditingStage(null)}
+                                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
+                                >
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                            <form onSubmit={submitEditStage} className="space-y-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">Stage name</label>
+                                    <input
+                                        type="text"
+                                        required
+                                        value={editStageName}
+                                        onChange={(e) => setEditStageName(e.target.value)}
+                                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10 focus:outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">Scheduled date</label>
+                                    <input
+                                        type="date"
+                                        required
+                                        min={job ? minStageDateInputForEdit(job, editStageDate) : undefined}
+                                        value={editStageDate}
+                                        onChange={(e) => setEditStageDate(e.target.value)}
+                                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10 focus:outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-600 mb-1">Status</label>
+                                    <select
+                                        value={editStageStatus}
+                                        onChange={(e) => setEditStageStatus(e.target.value)}
+                                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                                    >
+                                        <option value="PENDING">Pending</option>
+                                        <option value="IN_PROGRESS">In progress</option>
+                                        <option value="COMPLETED">Completed</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="flex items-center gap-1.5 text-xs font-bold text-gray-600 mb-1">
+                                        <MessageSquare className="w-3.5 h-3.5 text-gray-400" /> Comments
+                                    </label>
+                                    <textarea
+                                        value={editStageNotes}
+                                        onChange={(e) => setEditStageNotes(e.target.value)}
+                                        rows={3}
+                                        maxLength={8000}
+                                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10 focus:outline-none resize-y min-h-[72px]"
+                                    />
+                                    <p className="text-[11px] text-gray-400 mt-0.5">{editStageNotes.length}/8000</p>
+                                </div>
+                                <div>
+                                    <label className="flex items-center gap-1.5 text-xs font-bold text-gray-600 mb-1">
+                                        <Upload className="w-3.5 h-3.5 text-gray-400" /> Replace attachment
+                                    </label>
+                                    <p className="text-[11px] text-gray-500 mb-1.5">PDF or image, max 5 MB. Leave empty to keep the current file.</p>
+                                    {editingStage.attachmentPath && (
+                                        <label className="flex items-center gap-2 text-xs text-gray-700 mb-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={editClearAttachment}
+                                                onChange={(e) => {
+                                                    setEditClearAttachment(e.target.checked);
+                                                    if (e.target.checked) {
+                                                        setEditStageFile(null);
+                                                        setEditFileResetKey((k) => k + 1);
+                                                    }
+                                                }}
+                                                className="rounded border-gray-300"
+                                            />
+                                            Remove current attachment
+                                        </label>
+                                    )}
+                                    <label className={clsx('flex items-center gap-2', editClearAttachment && 'opacity-50 pointer-events-none')}>
+                                        <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-gray-700">
+                                            <Upload className="w-3.5 h-3.5" /> {editStageFile ? editStageFile.name : 'Choose file'}
+                                        </span>
+                                        <input
+                                            key={editFileResetKey}
+                                            type="file"
+                                            accept="application/pdf,image/jpeg,image/png"
+                                            disabled={editClearAttachment}
+                                            className="hidden"
+                                            onChange={(e) => setEditStageFile(e.target.files?.[0] ?? null)}
+                                        />
+                                    </label>
+                                    {editStageFile && !editClearAttachment && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setEditStageFile(null);
+                                                setEditFileResetKey((k) => k + 1);
+                                            }}
+                                            className="text-xs text-red-600 font-semibold mt-1 hover:underline"
+                                        >
+                                            Clear new file
+                                        </button>
+                                    )}
+                                </div>
+                                {editStageError && (
+                                    <p className="text-sm text-red-600 font-semibold">{editStageError}</p>
+                                )}
+                                <div className="flex justify-end gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditingStage(null)}
+                                        className="px-4 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={editStageLoading}
+                                        className="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white rounded-xl font-bold text-sm shadow-md"
+                                    >
+                                        {editStageLoading ? 'Saving…' : 'Save changes'}
+                                    </button>
+                                </div>
+                            </form>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* === DELETE STAGE CONFIRM === */}
+            <AnimatePresence>
+                {stageDeleteConfirm && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]"
+                    >
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl"
+                        >
+                            <div className="flex items-center gap-2 mb-3">
+                                <Trash2 className="w-6 h-6 text-red-600" />
+                                <h3 className="text-lg font-bold text-gray-900">Remove stage?</h3>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-4">
+                                Delete <span className="font-bold text-gray-900">&quot;{stageDeleteConfirm.name}&quot;</span>? Applicants currently on this stage
+                                are moved to the previous stage in the timeline (or the first remaining stage if this was the first one).
+                            </p>
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setStageDeleteConfirm(null)}
+                                    disabled={deleteStageLoading}
+                                    className="px-4 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => void confirmDeleteStage()}
+                                    disabled={deleteStageLoading}
+                                    className="px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded-xl font-bold text-sm"
+                                >
+                                    {deleteStageLoading ? 'Removing…' : 'Remove stage'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* === LOCK MODAL === */}
             <AnimatePresence>

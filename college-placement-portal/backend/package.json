@@ -14,7 +14,9 @@
     "seed": "prisma db seed",
     "db:seed": "prisma db seed",
     "seed:company-profiles": "ts-node scripts/importCompanies.ts",
-    "import:companies": "ts-node scripts/importCompanies.ts"
+    "import:companies": "ts-node scripts/importCompanies.ts",
+    "seed:test-random": "ts-node scripts/seed_test_random.ts",
+    "seed:permanent-demo": "ts-node scripts/runPermanentDemoSeed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.0.0",

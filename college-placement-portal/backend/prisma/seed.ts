@@ -2,7 +2,7 @@ import '../src/loadEnv';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import { upsertDemoCompanyProfiles } from '../src/utils/demoCompanyProfiles';
-import { importCompanyProfilesFromJson } from '../src/services/companyJsonImport.service';
+import { seedPermanentDemo } from './seedPermanentDemo';
 
 const prisma = new PrismaClient();
 
@@ -313,213 +313,6 @@ async function seedTimelineDemos(passwordHash: string) {
     );
 }
 
-async function seedFiftyStudentLifecycle(passwordHash: string) {
-    const spoc = await prisma.user.findUnique({ where: { email: 'spoc@example.com' } });
-    if (!spoc) return;
-
-    // Ensure the rating-integrated company dataset is present before assigning companies.
-    await importCompanyProfilesFromJson(prisma, (msg) => console.log(msg));
-
-    const profileCompanies = await prisma.companyProfile.findMany({
-        where: { companyName: { not: '' } },
-        orderBy: [{ rating: 'desc' }, { reviewCount: 'desc' }],
-        select: { companyName: true },
-        take: 24,
-    });
-    const fallbackCompanies = ['InnovateTech', 'TechCorp Solutions', 'DataMinds Inc.', 'Round3 Systems'];
-    const companies = Array.from(new Set([...profileCompanies.map((c) => c.companyName.trim()), ...fallbackCompanies])).filter(Boolean);
-    if (!companies.length) return;
-
-    const branches = ['CSE', 'ECE', 'MECH', 'CIVIL', 'EEE', 'IT'];
-    const rolePool = ['Software Engineer', 'Data Analyst', 'Business Analyst', 'QA Engineer', 'DevOps Engineer', 'Product Analyst'];
-
-    const cohortPrefix = 'alumni.seed';
-    const existingUsers = await prisma.user.findMany({
-        where: { email: { startsWith: cohortPrefix } },
-        select: { id: true, email: true, student: { select: { id: true } } },
-    });
-    const existingStudentIds = existingUsers.map((u) => u.student?.id).filter((id): id is string => Boolean(id));
-    if (existingStudentIds.length) {
-        await prisma.alumni.deleteMany({ where: { studentId: { in: existingStudentIds } } });
-        await prisma.profileLock.deleteMany({ where: { studentId: { in: existingStudentIds } } });
-        await prisma.placementRecord.deleteMany({ where: { studentId: { in: existingStudentIds } } });
-        await prisma.jobApplication.deleteMany({ where: { studentId: { in: existingStudentIds } } });
-        await prisma.resume.deleteMany({ where: { studentId: { in: existingStudentIds } } });
-        await prisma.student.deleteMany({ where: { id: { in: existingStudentIds } } });
-    }
-    if (existingUsers.length) {
-        await prisma.user.deleteMany({ where: { id: { in: existingUsers.map((u) => u.id) } } });
-    }
-
-    const applicationDeadline = defaultApplicationDeadline();
-    const lifecycleJobs: Array<{ id: string; companyName: string; role: string }> = [];
-    const companySlice = companies.slice(0, 12);
-    for (let i = 0; i < companySlice.length; i += 1) {
-        const companyName = companySlice[i];
-        const role = `Lifecycle ${rolePool[i % rolePool.length]}`;
-        await upsertSeedJob(spoc.id, {
-            role,
-            companyName,
-            description: `Lifecycle-seeded hiring track for ${companyName}.`,
-            requiredProfileFields: JSON.stringify(['resume', 'cgpa', 'linkedin']),
-            eligibleBranches: JSON.stringify(branches),
-            ctc: `${(8.5 + (i % 7)).toFixed(1)} LPA`,
-        });
-
-        const job = await prisma.job.findFirst({
-            where: { postedById: spoc.id, role, companyName },
-            select: { id: true, companyName: true, role: true },
-        });
-        if (!job) continue;
-
-        lifecycleJobs.push(job);
-        await prisma.job.update({
-            where: { id: job.id },
-            data: { status: 'PUBLISHED', placementMode: 'ON_CAMPUS', applicationDeadline },
-        });
-        await prisma.jobStage.deleteMany({ where: { jobId: job.id } });
-        await prisma.jobStage.createMany({
-            data: [
-                {
-                    jobId: job.id,
-                    name: 'Resume Shortlist',
-                    scheduledDate: new Date(applicationDeadline.getTime() + 7 * 24 * 60 * 60 * 1000),
-                    status: 'COMPLETED',
-                },
-                {
-                    jobId: job.id,
-                    name: 'Technical Interview',
-                    scheduledDate: new Date(applicationDeadline.getTime() + 14 * 24 * 60 * 60 * 1000),
-                    status: 'COMPLETED',
-                },
-                {
-                    jobId: job.id,
-                    name: 'HR Round',
-                    scheduledDate: new Date(applicationDeadline.getTime() + 21 * 24 * 60 * 60 * 1000),
-                    status: 'PENDING',
-                },
-            ],
-        });
-    }
-    if (!lifecycleJobs.length) return;
-
-    const firstNames = [
-        'Aarav', 'Aditi', 'Rohan', 'Sneha', 'Kunal', 'Isha', 'Nikhil', 'Meera', 'Arjun', 'Pooja',
-        'Vikas', 'Naina', 'Sahil', 'Priya', 'Manav', 'Ritika', 'Harsh', 'Diya', 'Krish', 'Ananya',
-    ];
-    const lastNames = ['Sharma', 'Verma', 'Singh', 'Patel', 'Rao', 'Gupta', 'Mehta', 'Nair', 'Iyer', 'Joshi'];
-    const currentYear = new Date().getFullYear();
-
-    for (let i = 1; i <= 50; i += 1) {
-        const idx = i - 1;
-        const email = `${cohortPrefix}${String(i).padStart(2, '0')}@example.com`;
-        const firstName = firstNames[idx % firstNames.length];
-        const lastName = lastNames[idx % lastNames.length];
-        const branch = branches[idx % branches.length];
-        const job = lifecycleJobs[idx % lifecycleJobs.length];
-        const scholarNo = `SEED${String(i).padStart(4, '0')}`;
-        const placementYear = currentYear - (idx % 5);
-        const placedAt = new Date(placementYear, idx % 12, 10 + (idx % 18));
-        const ctcValue = Number((6.5 + (idx % 10) * 0.7 + (idx % 3) * 0.2).toFixed(1));
-        const ctc = `${ctcValue} LPA`;
-
-        const user = await prisma.user.create({
-            data: {
-                email,
-                password: passwordHash,
-                role: 'STUDENT',
-                isVerified: true,
-            },
-        });
-        const student = await prisma.student.create({
-            data: {
-                userId: user.id,
-                firstName,
-                lastName,
-                branch,
-                course: 'BTech',
-                scholarNo,
-                phone: `90000${String(10000 + i).slice(-5)}`,
-                cgpa: Number((7 + ((idx % 14) * 0.15)).toFixed(2)),
-                isLocked: true,
-                lockedReason: `Placed at ${job.companyName}`,
-                placementType: 'ON_CAMPUS',
-                linkedin: `https://linkedin.com/in/${firstName.toLowerCase()}-${lastName.toLowerCase()}-${String(i).padStart(2, '0')}`,
-            },
-        });
-        const resume = await prisma.resume.create({
-            data: {
-                studentId: student.id,
-                fileName: `${firstName}_${lastName}_resume.pdf`,
-                fileUrl: `/uploads/lifecycle/${scholarNo}.pdf`,
-                roleName: job.role,
-                isActive: true,
-            },
-        });
-
-        await prisma.jobApplication.create({
-            data: {
-                studentId: student.id,
-                jobId: job.id,
-                resumeId: resume.id,
-                applicationData: JSON.stringify({ source: 'seed_lifecycle', scholarNo }),
-                extraAnswers: JSON.stringify({ motivation: 'Campus placement lifecycle seed data' }),
-                status: 'PLACED',
-                currentStageIndex: 2,
-                atsScore: 72 + (idx % 21),
-                atsExplanation: 'Lifecycle seed candidate with complete placement journey.',
-                atsMatchedKeywords: JSON.stringify(['communication', 'problem-solving', 'teamwork']),
-                semanticScore: 70 + (idx % 20),
-                skillScore: 68 + (idx % 22),
-                skillsMatched: JSON.stringify(['typescript', 'sql']),
-                skillsMissing: JSON.stringify([]),
-                suggestions: JSON.stringify([]),
-                appliedAt: new Date(placedAt.getTime() - 45 * 24 * 60 * 60 * 1000),
-            },
-        });
-
-        await prisma.placementRecord.create({
-            data: {
-                studentId: student.id,
-                jobId: job.id,
-                companyName: job.companyName,
-                role: job.role,
-                ctc,
-                placementMode: 'ON_CAMPUS',
-                createdBySpocId: spoc.id,
-                placedAt,
-            },
-        });
-
-        await prisma.alumni.create({
-            data: {
-                studentId: student.id,
-                userId: user.id,
-                name: `${firstName} ${lastName}`,
-                branch,
-                role: job.role,
-                ctc,
-                placementYear,
-                linkedinUrl: student.linkedin,
-                companyName: job.companyName,
-            },
-        });
-
-        await prisma.profileLock.create({
-            data: {
-                studentId: student.id,
-                profileLocked: true,
-                lockedById: spoc.id,
-                reason: `Placed at ${job.companyName}`,
-                isActive: true,
-                lockedAt: new Date(placedAt.getTime() + 24 * 60 * 60 * 1000),
-            },
-        });
-    }
-
-    console.log(`[seed] Lifecycle cohort created: 50 students placed across ${companySlice.length} rating companies.`);
-}
-
 async function main() {
     console.log('Seeding database (idempotent)...');
 
@@ -608,12 +401,15 @@ async function main() {
     await seedTimelineDemos(passwordHash);
 
     await upsertDemoCompanyProfiles(prisma);
-    await seedFiftyStudentLifecycle(passwordHash);
+    await seedPermanentDemo(prisma, passwordHash);
 
     console.log('Seed complete.');
     console.log('Default password for all seeded users:', DEFAULT_PASS);
     console.log(
         'Accounts: student@example.com, spoc@example.com, coord@example.com, ui_student@example.com, ui_spoc@example.com, ui_coord@example.com'
+    );
+    console.log(
+        'Permanent demo (additive, not removed on re-seed): permdemo.student01..50@example.com, permdemo.alumni001..100@example.com, jobs with [permdemo] in description.'
     );
     console.log('SPOC-seeded jobs are PUBLISHED with deadlines ~6 months ahead (visible on Job Board).');
 }

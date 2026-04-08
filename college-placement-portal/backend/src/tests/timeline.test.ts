@@ -106,12 +106,15 @@ describe('Timeline & Result Declaration Endpoints', () => {
     });
 
     it('should allow SPOC to add a Job Stage', async () => {
+        // Stage must be on/after today and strictly after application deadline (job deadline is +1 year).
+        const scheduled = new Date();
+        scheduled.setFullYear(scheduled.getFullYear() + 2);
         const res = await request(app)
             .patch(`/api/jobs/${jobId}/stage`)
             .set('Authorization', `Bearer ${spocToken}`)
             .send({
                 name: 'Online Assessment',
-                scheduledDate: new Date().toISOString()
+                scheduledDate: scheduled.toISOString()
             });
 
         expect(res.statusCode).toEqual(200);

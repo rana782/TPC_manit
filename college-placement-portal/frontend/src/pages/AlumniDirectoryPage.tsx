@@ -11,11 +11,9 @@ import {
     YAxis,
     CartesianGrid,
     Tooltip,
-    PieChart,
-    Pie,
-    Cell,
     LineChart,
-    Line
+    Line,
+    Legend,
 } from 'recharts';
 
 interface AlumniRecord {
@@ -29,9 +27,6 @@ interface AlumniRecord {
     linkedinUrl: string | null;
 }
 
-const roleTabs = ['STUDENT', 'SPOC', 'COORDINATOR'] as const;
-const CHART_COLORS = ['#2563eb', '#7c3aed', '#059669', '#ea580c', '#db2777', '#0891b2', '#4f46e5'];
-
 function parseCtc(value?: string | null): number | null {
     if (!value) return null;
     const num = parseFloat(String(value).replace(/[^0-9.]/g, ''));
@@ -39,7 +34,7 @@ function parseCtc(value?: string | null): number | null {
 }
 
 export default function AlumniDirectoryPage() {
-    const { token, user } = useAuth();
+    const { token } = useAuth();
     const apiBase = getViteApiBase();
     const [query, setQuery] = useState('');
     const [branch, setBranch] = useState('All');
@@ -47,17 +42,10 @@ export default function AlumniDirectoryPage() {
     const [rows, setRows] = useState<AlumniRecord[]>([]);
     const [allRows, setAllRows] = useState<AlumniRecord[]>([]);
     const [loading, setLoading] = useState(false);
-    const [activeTab, setActiveTab] = useState<(typeof roleTabs)[number]>(user?.role as any || 'STUDENT');
     const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
     const [error, setError] = useState('');
 
     const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-
-    useEffect(() => {
-        if (user?.role && roleTabs.includes(user.role as any)) {
-            setActiveTab(user.role as any);
-        }
-    }, [user?.role]);
 
     const runSearch = async () => {
         setLoading(true);
@@ -118,6 +106,37 @@ export default function AlumniDirectoryPage() {
             map[b] = (map[b] || 0) + 1;
         });
         return Object.entries(map).map(([branch, count]) => ({ branch, count })).sort((a, b) => b.count - a.count);
+    }, [rows]);
+
+    /** Per-branch average & median LPA (only alumni with parseable CTC). Sorted by average descending. */
+    const branchPackageStats = useMemo(() => {
+        const map: Record<string, number[]> = {};
+        for (const r of rows) {
+            const ctc = parseCtc(r.ctc);
+            if (ctc == null) continue;
+            const b = (r.branch || 'Unknown').trim() || 'Unknown';
+            if (!map[b]) map[b] = [];
+            map[b].push(ctc);
+        }
+        return Object.entries(map)
+            .map(([branchFull, values]) => {
+                const n = values.length;
+                const sum = values.reduce((acc, x) => acc + x, 0);
+                const sorted = [...values].sort((a, b) => a - b);
+                const mid = Math.floor(sorted.length / 2);
+                const median =
+                    sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+                const display =
+                    branchFull.length > 16 ? `${branchFull.slice(0, 14)}…` : branchFull;
+                return {
+                    branch: display,
+                    branchFull,
+                    avgLpa: Number((sum / n).toFixed(2)),
+                    medianLpa: Number(median.toFixed(2)),
+                    countWithCtc: n,
+                };
+            })
+            .sort((a, b) => b.avgLpa - a.avgLpa);
     }, [rows]);
 
     const topBranch = branchCounts[0]?.branch || 'Not available';
@@ -192,36 +211,7 @@ export default function AlumniDirectoryPage() {
                 <h1 className="text-3xl font-black text-gray-900 flex items-center gap-2 tracking-tight">
                     <Users className="w-6 h-6 text-primary-600" /> Global Alumni Search
                 </h1>
-                <p className="text-sm text-gray-500 mt-1">Accessible for Student, SPOC, and Coordinator. Search by alumni name or company.</p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="bg-gradient-to-br from-primary-50 to-white border border-primary-100 rounded-2xl p-4 shadow-sm">
-                    <p className="text-xs font-bold text-gray-500 uppercase">Current View</p>
-                    <p className="text-xl font-black text-primary-700 mt-1">{activeTab}</p>
-                </div>
-                <div className="bg-gradient-to-br from-violet-50 to-white border border-violet-100 rounded-2xl p-4 shadow-sm">
-                    <p className="text-xs font-bold text-gray-500 uppercase">Results</p>
-                    <p className="text-xl font-black text-violet-700 mt-1">{rows.length}</p>
-                </div>
-                <div className="bg-gradient-to-br from-emerald-50 to-white border border-emerald-100 rounded-2xl p-4 shadow-sm">
-                    <p className="text-xs font-bold text-gray-500 uppercase">Query</p>
-                    <p className="text-base font-black text-emerald-700 mt-1">{query || 'All alumni'}</p>
-                </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-                {roleTabs.map((tab) => (
-                    <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                            activeTab === tab ? 'bg-primary-50 text-primary-700 border-primary-200 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                        }`}
-                    >
-                        {tab} View
-                    </button>
-                ))}
+                <p className="text-sm text-gray-500 mt-1">Search by alumni name or company.</p>
             </div>
 
             <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
@@ -351,22 +341,80 @@ export default function AlumniDirectoryPage() {
                     </div>
                 </div>
 
-                <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
-                    <h3 className="text-sm font-black text-gray-900 mb-2 flex items-center gap-2">
-                        <IndianRupee className="w-4 h-4 text-emerald-600" /> Salary Distribution by Branch
+                <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm" data-testid="alumni-branch-package-chart">
+                    <h3 className="text-sm font-black text-gray-900 mb-1 flex items-center gap-2">
+                        <IndianRupee className="w-4 h-4 text-emerald-600" /> Branch vs average & median package
                     </h3>
-                    <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie data={branchCounts} dataKey="count" nameKey="branch" cx="50%" cy="50%" outerRadius={90}>
-                                    {branchCounts.map((_, idx) => (
-                                        <Cell key={`cell-${idx}`} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <p className="text-[11px] text-gray-500 mb-2">
+                        Grouped bars per branch: mean and median LPA from alumni with a parseable CTC. Horizontal layout keeps branch names readable.
+                    </p>
+                    {branchPackageStats.length === 0 ? (
+                        <p className="text-sm text-gray-500 py-12 text-center">No salary figures available to compare by branch.</p>
+                    ) : (
+                        <div
+                            className="w-full"
+                            style={{ height: Math.min(440, Math.max(280, branchPackageStats.length * 52)) }}
+                        >
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart
+                                    layout="vertical"
+                                    data={branchPackageStats}
+                                    margin={{ top: 8, right: 16, left: 4, bottom: 8 }}
+                                    barCategoryGap="14%"
+                                    barGap={2}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f3f4f6" />
+                                    <XAxis
+                                        type="number"
+                                        tick={{ fontSize: 11 }}
+                                        domain={([, max]) => [0, Math.max(1, Math.ceil((max ?? 0) * 1.12))]}
+                                        label={{ value: 'LPA', position: 'insideBottomRight', offset: -4, style: { fontSize: 11, fill: '#6b7280' } }}
+                                    />
+                                    <YAxis
+                                        type="category"
+                                        dataKey="branch"
+                                        width={108}
+                                        tick={{ fontSize: 10 }}
+                                        interval={0}
+                                    />
+                                    <Tooltip
+                                        cursor={{ fill: 'rgba(37, 99, 235, 0.06)' }}
+                                        content={({ active, payload }) => {
+                                            if (!active || !payload?.length) return null;
+                                            const p = payload[0].payload as (typeof branchPackageStats)[0];
+                                            return (
+                                                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs shadow-md max-w-[240px]">
+                                                    <p className="font-bold text-gray-900">{p.branchFull}</p>
+                                                    <p className="text-emerald-700 mt-1 font-semibold">Average: {p.avgLpa} LPA</p>
+                                                    <p className="text-indigo-700 font-semibold">Median: {p.medianLpa} LPA</p>
+                                                    <p className="text-gray-500 mt-1">{p.countWithCtc} alumni with package data</p>
+                                                </div>
+                                            );
+                                        }}
+                                    />
+                                    <Legend
+                                        verticalAlign="top"
+                                        align="right"
+                                        wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
+                                    />
+                                    <Bar
+                                        dataKey="avgLpa"
+                                        name="Average (LPA)"
+                                        fill="#059669"
+                                        radius={[0, 4, 4, 0]}
+                                        maxBarSize={22}
+                                    />
+                                    <Bar
+                                        dataKey="medianLpa"
+                                        name="Median (LPA)"
+                                        fill="#6366f1"
+                                        radius={[0, 4, 4, 0]}
+                                        maxBarSize={22}
+                                    />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    )}
                 </div>
 
                 <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">

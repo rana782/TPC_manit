@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createJob, listJobs, getJob, updateJob, deleteJob, exportApplicantsCsv, addOrUpdateStage, uploadStageShortlistDoc, uploadStageShortlistAndMap, advanceStage, regressStage, dropApplicants, declareResults, getStudentJobDetails } from '../controllers/job.controller';
+import { createJob, listJobs, getJob, updateJob, deleteJob, exportApplicantsCsv, addOrUpdateStage, updateJobStage, deleteJobStage, uploadStageShortlistDoc, uploadStageShortlistAndMap, advanceStage, regressStage, dropApplicants, declareResults, getStudentJobDetails } from '../controllers/job.controller';
 import { verifyToken, requireRole } from '../middlewares/auth.middleware';
 import { uploadDocument, uploadJobDocs, uploadShortlist } from '../middlewares/upload.middleware';
 
@@ -23,7 +23,9 @@ router.put('/:id', requireRole(['SPOC', 'COORDINATOR']), cpUpload, updateJob);
 router.delete('/:id', requireRole(['SPOC', 'COORDINATOR']), deleteJob);
 router.get('/:id/applicants/csv', requireRole(['SPOC', 'COORDINATOR']), exportApplicantsCsv);
 
-router.patch('/:id/stage', requireRole(['SPOC', 'COORDINATOR']), addOrUpdateStage);
+router.patch('/:id/stage', requireRole(['SPOC', 'COORDINATOR']), uploadDocument.single('stageAttachment'), addOrUpdateStage);
+router.patch('/:id/stages/:stageId', requireRole(['SPOC', 'COORDINATOR']), uploadDocument.single('stageAttachment'), updateJobStage);
+router.delete('/:id/stages/:stageId', requireRole(['SPOC', 'COORDINATOR']), deleteJobStage);
 router.patch('/:id/stages/:stageId/shortlist-doc', requireRole(['SPOC', 'COORDINATOR']), uploadDocument.single('shortlistDoc'), uploadStageShortlistDoc);
 router.post('/:id/stages/:stageId/upload-shortlist', requireRole(['SPOC', 'COORDINATOR']), uploadShortlist.single('shortlistFile'), uploadStageShortlistAndMap);
 router.patch('/:id/advance-stage', requireRole(['SPOC', 'COORDINATOR']), advanceStage);

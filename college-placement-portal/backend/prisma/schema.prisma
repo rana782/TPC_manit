@@ -213,6 +213,10 @@ model JobStage {
   scheduledDate DateTime
   status        String @default("")
   shortlistDocPath String?
+  /// Optional comments / instructions for this stage (shown in Job Timeline)
+  notes         String?
+  /// Optional PDF or image uploaded when the stage was created
+  attachmentPath String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 }

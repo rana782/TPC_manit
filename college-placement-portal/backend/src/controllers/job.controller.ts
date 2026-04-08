@@ -1,11 +1,91 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { z } from 'zod';
 
 const prisma = new PrismaClient();
+
+function unlinkUploadRelative(relPath: string | null | undefined) {
+    if (!relPath || typeof relPath !== 'string' || !relPath.startsWith('/uploads/')) return;
+    const name = path.basename(relPath);
+    const full = path.resolve(__dirname, '../../uploads', name);
+    try {
+        fs.unlinkSync(full);
+    } catch {
+        /* ignore missing file */
+    }
+}
+
+/** When stage dates change, sorted order may change — remap indices by stage id. */
+async function remapApplicationsAfterStageOrderChange(
+    jobId: string,
+    oldStagesOrdered: { id: string }[],
+    newStagesOrdered: { id: string }[]
+) {
+    const apps = await prisma.jobApplication.findMany({ where: { jobId }, select: { id: true, currentStageIndex: true } });
+    const updates: { id: string; currentStageIndex: number }[] = [];
+    for (const app of apps) {
+        const k = app.currentStageIndex ?? 0;
+        if (k < 0) continue;
+        if (k >= oldStagesOrdered.length) {
+            updates.push({
+                id: app.id,
+                currentStageIndex: newStagesOrdered.length ? Math.min(k, newStagesOrdered.length - 1) : -1
+            });
+            continue;
+        }
+        const sid = oldStagesOrdered[k].id;
+        const newIdx = newStagesOrdered.findIndex((s) => s.id === sid);
+        if (newIdx === -1) {
+            updates.push({ id: app.id, currentStageIndex: -1 });
+        } else {
+            updates.push({ id: app.id, currentStageIndex: newIdx });
+        }
+    }
+    if (updates.length === 0) return;
+    await prisma.$transaction(
+        updates.map((u) => prisma.jobApplication.update({ where: { id: u.id }, data: { currentStageIndex: u.currentStageIndex } }))
+    );
+}
+
+/** After deleting one stage, shift applicant indices. */
+async function remapApplicationsAfterStageDelete(
+    jobId: string,
+    deletedIndex: number,
+    oldLen: number,
+    newStagesOrdered: { id: string }[]
+) {
+    if (newStagesOrdered.length === 0) {
+        await prisma.jobApplication.updateMany({ where: { jobId }, data: { currentStageIndex: -1 } });
+        return;
+    }
+    const apps = await prisma.jobApplication.findMany({ where: { jobId }, select: { id: true, currentStageIndex: true } });
+    const updates: { id: string; currentStageIndex: number }[] = [];
+    for (const app of apps) {
+        const k = app.currentStageIndex ?? 0;
+        if (k < 0) continue;
+        if (k >= oldLen) {
+            updates.push({ id: app.id, currentStageIndex: Math.max(0, newStagesOrdered.length - 1) });
+            continue;
+        }
+        if (k < deletedIndex) {
+            updates.push({ id: app.id, currentStageIndex: k });
+        } else if (k === deletedIndex) {
+            const newIdx = deletedIndex === 0 ? 0 : deletedIndex - 1;
+            updates.push({ id: app.id, currentStageIndex: Math.min(newIdx, newStagesOrdered.length - 1) });
+        } else {
+            updates.push({ id: app.id, currentStageIndex: k - 1 });
+        }
+    }
+    if (updates.length === 0) return;
+    await prisma.$transaction(
+        updates.map((u) => prisma.jobApplication.update({ where: { id: u.id }, data: { currentStageIndex: u.currentStageIndex } }))
+    );
+}
 
 /** Coordinators may manage any job; SPOCs only their own postings. */
 function canManageJobPlacement(role: string | undefined, jobPostedById: string, userId: string | undefined): boolean {
@@ -18,6 +98,15 @@ function startOfToday(): Date {
     d.setHours(0, 0, 0, 0);
     return d;
 }
+
+function startOfDay(d: Date): Date {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+}
+
+/** Consistent ordering when multiple stages share the same calendar day */
+const STAGE_ORDER_BY = [{ scheduledDate: 'asc' as const }, { createdAt: 'asc' as const }];
 
 const baseJobSchema = z.object({
     role: z.string().min(2),
@@ -169,7 +258,7 @@ export const getJob = async (req: AuthRequest, res: Response) => {
         // Fetch fundamental job basic stats with stages unconditionally
         let queryArgs: any = {
             where: { id },
-            include: { stages: { orderBy: { scheduledDate: 'asc' } } }
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
         };
 
         // If SPOC, densely populate the applications hook
@@ -192,7 +281,11 @@ export const getJob = async (req: AuthRequest, res: Response) => {
             return res.status(404).json({ success: false, message: 'Job not found' });
         }
 
-        const stagesOrdered = (job.stages || []).slice().sort((a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime());
+        const stagesOrdered = (job.stages || []).slice().sort(
+            (a, b) =>
+                startOfDay(new Date(a.scheduledDate)).getTime() - startOfDay(new Date(b.scheduledDate)).getTime() ||
+                new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
 
         const timelineStages = stagesOrdered.map((s, i) => ({
             id: s.id,
@@ -200,7 +293,9 @@ export const getJob = async (req: AuthRequest, res: Response) => {
             order: i + 1,
             scheduledDate: s.scheduledDate,
             status: s.status,
-            shortlistDocPath: s.shortlistDocPath || null
+            shortlistDocPath: s.shortlistDocPath || null,
+            notes: s.notes ?? null,
+            attachmentPath: s.attachmentPath ?? null
         }));
 
         const groupedApplicants: Record<string, unknown[]> = {};
@@ -434,7 +529,7 @@ export const getStudentJobDetails = async (req: AuthRequest, res: Response) => {
         const job = await prisma.job.findUnique({
             where: { id },
             include: {
-                stages: { orderBy: { scheduledDate: 'asc' } },
+                stages: { orderBy: STAGE_ORDER_BY },
             },
         });
 
@@ -499,11 +594,22 @@ export const addOrUpdateStage = async (req: AuthRequest, res: Response) => {
     try {
         const { id } = req.params;
         const userId = req.user?.id;
-        const { name, scheduledDate, status } = req.body;
+        const { name: rawName, scheduledDate, status } = req.body;
+        const name = typeof rawName === 'string' ? rawName.trim() : '';
+        const notesRaw = typeof req.body.notes === 'string' ? req.body.notes.trim() : '';
+        const notes = notesRaw.length > 0 ? notesRaw.slice(0, 8000) : null;
+        const attachmentPath = req.file ? `/uploads/${req.file.filename}` : null;
+
+        if (!name) {
+            return res.status(400).json({ success: false, message: 'Stage name is required' });
+        }
+        if (!scheduledDate) {
+            return res.status(400).json({ success: false, message: 'Scheduled date is required' });
+        }
 
         const job = await prisma.job.findUnique({
             where: { id },
-            include: { stages: { orderBy: { scheduledDate: 'asc' } } }
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
         });
         if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
         if (!canManageJobPlacement(req.user?.role, job.postedById, userId)) {
@@ -511,26 +617,50 @@ export const addOrUpdateStage = async (req: AuthRequest, res: Response) => {
         }
 
         const stageDate = new Date(scheduledDate);
-        const deadline = new Date(job.applicationDeadline);
-        if (stageDate <= deadline) {
-            return res.status(400).json({ success: false, message: 'Timeline stages must occur sequentially and after application deadline' });
+        const stageDay = startOfDay(stageDate);
+        const deadlineDay = startOfDay(new Date(job.applicationDeadline));
+        const todayDay = startOfToday();
+
+        if (stageDay.getTime() < todayDay.getTime()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Stage scheduled date must be today or later'
+            });
         }
-        const existingStages = job.stages || [];
-        if (existingStages.length > 0) {
-            const lastDate = new Date(existingStages[existingStages.length - 1].scheduledDate);
-            if (stageDate <= lastDate) {
-                return res.status(400).json({ success: false, message: 'Timeline stages must occur sequentially and after application deadline' });
-            }
+        if (stageDay.getTime() <= deadlineDay.getTime()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Stage date must be after the application deadline'
+            });
         }
+
+        const oldStagesOrdered = [...(job.stages || [])].sort(
+            (a, b) =>
+                startOfDay(new Date(a.scheduledDate)).getTime() - startOfDay(new Date(b.scheduledDate)).getTime() ||
+                new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
 
         const stage = await prisma.jobStage.create({
             data: {
                 jobId: job.id,
                 name,
                 scheduledDate: new Date(scheduledDate),
-                status: status || 'PENDING'
+                status: status || 'PENDING',
+                notes,
+                attachmentPath
             }
         });
+
+        const jobAfter = await prisma.job.findUnique({
+            where: { id },
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
+        });
+        const newStagesOrdered = [...(jobAfter?.stages || [])].sort(
+            (a, b) =>
+                startOfDay(new Date(a.scheduledDate)).getTime() - startOfDay(new Date(b.scheduledDate)).getTime() ||
+                new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+        await remapApplicationsAfterStageOrderChange(id, oldStagesOrdered, newStagesOrdered);
 
         // Broadcast to all applicants
         const students = await prisma.jobApplication.findMany({
@@ -553,6 +683,158 @@ export const addOrUpdateStage = async (req: AuthRequest, res: Response) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Failed to add stage' });
+    }
+};
+
+export const updateJobStage = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id, stageId } = req.params;
+        const userId = req.user?.id;
+
+        const job = await prisma.job.findUnique({
+            where: { id },
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
+        });
+        if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+        if (!canManageJobPlacement(req.user?.role, job.postedById, userId)) {
+            return res.status(403).json({ success: false, message: 'Forbidden' });
+        }
+
+        const oldStagesOrdered = [...(job.stages || [])].sort(
+            (a, b) =>
+                startOfDay(new Date(a.scheduledDate)).getTime() - startOfDay(new Date(b.scheduledDate)).getTime() ||
+                new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+        const stageIdx = oldStagesOrdered.findIndex((s) => s.id === stageId);
+        if (stageIdx === -1) {
+            return res.status(404).json({ success: false, message: 'Stage not found for this job' });
+        }
+        const existing = oldStagesOrdered[stageIdx];
+
+        const rawName = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+        const name = rawName || existing.name;
+        if (!name) {
+            return res.status(400).json({ success: false, message: 'Stage name is required' });
+        }
+
+        const scheduledDateRaw = req.body.scheduledDate;
+        if (scheduledDateRaw == null || scheduledDateRaw === '') {
+            return res.status(400).json({ success: false, message: 'Scheduled date is required' });
+        }
+        const stageDate = new Date(scheduledDateRaw);
+        const stageDay = startOfDay(stageDate);
+        const deadlineDay = startOfDay(new Date(job.applicationDeadline));
+        const todayDay = startOfToday();
+        const existingDay = startOfDay(new Date(existing.scheduledDate));
+        const dateChanged = stageDay.getTime() !== existingDay.getTime();
+
+        if (dateChanged) {
+            if (stageDay.getTime() < todayDay.getTime()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Stage scheduled date must be today or later'
+                });
+            }
+            if (stageDay.getTime() <= deadlineDay.getTime()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Stage date must be after the application deadline'
+                });
+            }
+        }
+
+        const notesRaw = typeof req.body.notes === 'string' ? req.body.notes.trim() : '';
+        const notes = notesRaw.length > 0 ? notesRaw.slice(0, 8000) : null;
+
+        const status =
+            typeof req.body.status === 'string' && req.body.status.trim()
+                ? req.body.status.trim()
+                : existing.status || 'PENDING';
+
+        const clearAttachment =
+            req.body.clearAttachment === 'true' ||
+            req.body.clearAttachment === '1' ||
+            req.body.clearAttachment === true;
+
+        const data: Record<string, unknown> = {
+            name,
+            scheduledDate: stageDate,
+            status,
+            notes
+        };
+
+        if (clearAttachment) {
+            data.attachmentPath = null;
+            if (existing.attachmentPath) unlinkUploadRelative(existing.attachmentPath);
+        } else if (req.file) {
+            data.attachmentPath = `/uploads/${req.file.filename}`;
+            if (existing.attachmentPath) unlinkUploadRelative(existing.attachmentPath);
+        }
+
+        const updated = await prisma.jobStage.update({
+            where: { id: stageId },
+            data
+        });
+
+        const jobAfter = await prisma.job.findUnique({
+            where: { id },
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
+        });
+        const newStagesOrdered = [...(jobAfter?.stages || [])].sort(
+            (a, b) =>
+                startOfDay(new Date(a.scheduledDate)).getTime() - startOfDay(new Date(b.scheduledDate)).getTime() ||
+                new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+        await remapApplicationsAfterStageOrderChange(id, oldStagesOrdered, newStagesOrdered);
+
+        return res.json({ success: true, stage: updated });
+    } catch (error) {
+        console.error('[updateJobStage]', error);
+        return res.status(500).json({ success: false, message: 'Failed to update stage' });
+    }
+};
+
+export const deleteJobStage = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id, stageId } = req.params;
+        const userId = req.user?.id;
+
+        const job = await prisma.job.findUnique({
+            where: { id },
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
+        });
+        if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+        if (!canManageJobPlacement(req.user?.role, job.postedById, userId)) {
+            return res.status(403).json({ success: false, message: 'Forbidden' });
+        }
+
+        const oldStagesOrdered = [...(job.stages || [])].sort(
+            (a, b) =>
+                startOfDay(new Date(a.scheduledDate)).getTime() - startOfDay(new Date(b.scheduledDate)).getTime() ||
+                new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+        const deletedIndex = oldStagesOrdered.findIndex((s) => s.id === stageId);
+        if (deletedIndex === -1) {
+            return res.status(404).json({ success: false, message: 'Stage not found for this job' });
+        }
+
+        const toDelete = oldStagesOrdered[deletedIndex];
+        if (toDelete.attachmentPath) unlinkUploadRelative(toDelete.attachmentPath);
+        if (toDelete.shortlistDocPath) unlinkUploadRelative(toDelete.shortlistDocPath);
+
+        await prisma.jobStage.delete({ where: { id: stageId } });
+
+        const newStagesOrdered = await prisma.jobStage.findMany({
+            where: { jobId: id },
+            orderBy: STAGE_ORDER_BY
+        });
+
+        await remapApplicationsAfterStageDelete(id, deletedIndex, oldStagesOrdered.length, newStagesOrdered);
+
+        return res.json({ success: true, message: 'Stage removed' });
+    } catch (error) {
+        console.error('[deleteJobStage]', error);
+        return res.status(500).json({ success: false, message: 'Failed to delete stage' });
     }
 };
 
@@ -602,7 +884,7 @@ export const uploadStageShortlistAndMap = async (req: AuthRequest, res: Response
 
         const job = await prisma.job.findUnique({
             where: { id },
-            include: { stages: { orderBy: { scheduledDate: 'asc' } } }
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
         });
         if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
         if (!canManageJobPlacement(req.user?.role, job.postedById, userId)) {
@@ -712,7 +994,7 @@ export const advanceStage = async (req: AuthRequest, res: Response) => {
 
         const job = await prisma.job.findUnique({
             where: { id },
-            include: { stages: { orderBy: { scheduledDate: 'asc' } } }
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
         });
         if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
         if (!canManageJobPlacement(req.user?.role, job.postedById, userId)) {
@@ -810,7 +1092,7 @@ export const regressStage = async (req: AuthRequest, res: Response) => {
 
         const job = await prisma.job.findUnique({
             where: { id },
-            include: { stages: { orderBy: { scheduledDate: 'asc' } } }
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
         });
         if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
         if (!canManageJobPlacement(req.user?.role, job.postedById, userId)) {
@@ -978,7 +1260,7 @@ export const declareResults = async (req: AuthRequest, res: Response) => {
 
         const job = await prisma.job.findUnique({
             where: { id },
-            include: { stages: { orderBy: { scheduledDate: 'asc' } } }
+            include: { stages: { orderBy: STAGE_ORDER_BY } }
         });
         if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
         if (!canManageJobPlacement(req.user?.role, job.postedById, userId)) {
@@ -1002,12 +1284,6 @@ export const declareResults = async (req: AuthRequest, res: Response) => {
 
         if (selectedApplications.length !== uniqueStudentIds.length) {
             return res.status(404).json({ success: false, message: 'One or more selected students do not have applications for this job' });
-        }
-
-        const finalStageIndex = job.stages.length - 1;
-        const invalidForPlacement = selectedApplications.filter((app) => (app.currentStageIndex ?? 0) !== finalStageIndex);
-        if (invalidForPlacement.length > 0) {
-            return res.status(400).json({ success: false, message: 'Declare placed is allowed only for students in final stage' });
         }
 
         const alreadyPlaced = selectedApplications.filter((app) => app.status === 'PLACED');

@@ -74,7 +74,7 @@ test('valid_case - move to next stage for selected students', async ({ page }) =
   await page.screenshot({ path: `${SELECTION_DIR}/valid_case.png`, fullPage: true });
 });
 
-test('invalid_case - mixed stage selection blocked', async ({ page }) => {
+test('invalid_case - mixed stage selection hides move but allows declare placed', async ({ page }) => {
   await loginAsSpoc(page);
   await openRound3Details(page, [
     { id: 'a1', student: { id: 's1', firstName: 'A', lastName: 'One', scholarNo: 'SC1', isLocked: false }, status: 'APPLIED', atsScore: 80, currentStageIndex: 0 },
@@ -85,12 +85,13 @@ test('invalid_case - mixed stage selection blocked', async ({ page }) => {
 
   await expect(page.getByText(/mixed stages/i)).toBeVisible();
   await expect(page.getByRole('button', { name: /Move to Next Stage/i })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Declare Placed/i })).toBeVisible();
 
   await page.screenshot({ path: `${TIMELINE_DIR}/invalid_case.png`, fullPage: true });
   await page.screenshot({ path: `${SELECTION_DIR}/invalid_case.png`, fullPage: true });
 });
 
-test('edge_case - final stage selection shows declare placed', async ({ page }) => {
+test('edge_case - any stage selection shows declare placed', async ({ page }) => {
   await loginAsSpoc(page);
   await openRound3Details(page, [
     { id: 'a1', student: { id: 's1', firstName: 'A', lastName: 'One', scholarNo: 'SC1', isLocked: false }, status: 'APPLIED', atsScore: 80, currentStageIndex: 2 }

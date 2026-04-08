@@ -64,7 +64,7 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: `${LOCK_DIR}/${name}.png`, fullPage: true });
 }
 
-test('valid_case - declare placed at final stage', async ({ page }) => {
+test('valid_case - declare placed (bulk)', async ({ page }) => {
   await loginAsSpoc(page);
   await page.route('**/api/jobs/job_place/results', (route) =>
     route.fulfill({ status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ success: true }) })
@@ -77,24 +77,28 @@ test('valid_case - declare placed at final stage', async ({ page }) => {
   await shot(page, 'valid_case');
 });
 
-test('invalid_case - declare placed blocked by backend', async ({ page }) => {
+test('invalid_case - declare placed shows backend error', async ({ page }) => {
   await loginAsSpoc(page);
   await page.route('**/api/jobs/job_place/results', (route) =>
-    route.fulfill({ status: 400, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ success: false, message: 'Declare placed is allowed only for students in final stage' }) })
+    route.fulfill({
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ success: false, message: 'Simulated placement error from server' })
+    })
   );
   await openPlacementPage(page, 1);
   await page.locator('tbody tr').first().click();
   await page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: /Declare Placed/i }).click();
-  await expect(page.getByText(/allowed only for students in final stage/i)).toBeVisible();
+  await expect(page.getByText(/Simulated placement error from server/i)).toBeVisible();
   await shot(page, 'invalid_case');
 });
 
-test('edge_case - non-final stage does not show declare placed', async ({ page }) => {
+test('edge_case - non-final stage still shows declare placed', async ({ page }) => {
   await loginAsSpoc(page);
   await openPlacementPage(page, 0);
   await page.locator('tbody tr').first().click();
-  await expect(page.getByRole('button', { name: /Declare Placed/i })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Declare Placed/i })).toBeVisible();
   await expect(page.getByRole('button', { name: /Move to Next Stage/i })).toBeVisible();
   await shot(page, 'edge_case');
 });
