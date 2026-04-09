@@ -13,6 +13,8 @@ export default function Register() {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [role, setRole] = useState<'STUDENT' | 'SPOC'>('STUDENT');
     const [otp, setOtp] = useState('');
     const [showOtpForm, setShowOtpForm] = useState(false);
     const [error, setError] = useState('');
@@ -27,11 +29,17 @@ export default function Register() {
         setError('');
         setLoading(true);
         try {
+            if (password !== confirmPassword) {
+                setError('Password and confirm password do not match.');
+                setLoading(false);
+                return;
+            }
             await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/register`, {
                 name,
                 email,
                 password,
-                role: 'STUDENT'
+                confirmPassword,
+                role
             });
             setShowOtpForm(true);
             setSuccess('OTP sent to your email. Please check your inbox.');
@@ -67,7 +75,7 @@ export default function Register() {
             title={showOtpForm ? 'Verify your email' : 'Create an account'}
             subtitle={
                 showOtpForm
-                    ? `Enter the 6-digit code sent to ${email}`
+                    ? `Enter the 6-character OTP sent to ${email}`
                     : 'Start your placement journey today'
             }
         >
@@ -142,6 +150,29 @@ export default function Register() {
                             required
                             minLength={6}
                         />
+                        <Input
+                            label="Confirm password"
+                            type="password"
+                            value={confirmPassword}
+                            onChange={e => setConfirmPassword(e.target.value)}
+                            placeholder="Re-enter your password"
+                            icon={<Lock className="w-4 h-4" />}
+                            required
+                            minLength={6}
+                        />
+                        <div className="space-y-1.5">
+                            <label className="block text-sm font-medium text-gray-700">
+                                Role
+                            </label>
+                            <select
+                                value={role}
+                                onChange={(e) => setRole(e.target.value as 'STUDENT' | 'SPOC')}
+                                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-900 transition-all duration-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none hover:border-gray-400"
+                            >
+                                <option value="STUDENT">Student</option>
+                                <option value="SPOC">SPOC</option>
+                            </select>
+                        </div>
 
                         <Button
                             type="submit"

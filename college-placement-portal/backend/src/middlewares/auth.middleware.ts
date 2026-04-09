@@ -28,15 +28,43 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET) as any;
+        const decodedId =
+            (typeof decoded?.id === 'string' && decoded.id.trim()) ||
+            (typeof decoded?.userId === 'string' && decoded.userId.trim()) ||
+            (typeof decoded?.sub === 'string' && decoded.sub.trim()) ||
+            '';
+        const decodedEmail = typeof decoded?.email === 'string' ? decoded.email.trim() : '';
 
-        // Check if user account has been disabled
-        const user = await prisma.user.findUnique({
-            where: { id: decoded.id },
-            select: {
-                id: true, email: true, role: true, isDisabled: true,
-                isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
-            }
-        });
+        // Check if user account has been disabled.
+        // Support legacy token payloads (userId/sub) and recover by email for stale IDs.
+        let user = null as null | {
+            id: string;
+            email: string;
+            role: string;
+            isDisabled: boolean;
+            isVerified: boolean;
+            permJobCreate: boolean;
+            permLockProfile: boolean;
+            permExportCsv: boolean;
+        };
+        if (decodedId) {
+            user = await prisma.user.findUnique({
+                where: { id: decodedId },
+                select: {
+                    id: true, email: true, role: true, isDisabled: true,
+                    isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
+                }
+            });
+        }
+        if (!user && decodedEmail) {
+            user = await prisma.user.findUnique({
+                where: { email: decodedEmail },
+                select: {
+                    id: true, email: true, role: true, isDisabled: true,
+                    isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
+                }
+            });
+        }
 
         if (!user) {
             return res.status(401).json({ success: false, message: 'User not found' });

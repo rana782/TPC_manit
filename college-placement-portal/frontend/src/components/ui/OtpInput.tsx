@@ -25,10 +25,10 @@ export default function OtpInput({ length = 6, value, onChange, error }: OtpInpu
     };
 
     const handleChange = (index: number, val: string) => {
-        if (!/^\d*$/.test(val)) return;
+        if (!/^[a-zA-Z0-9]*$/.test(val)) return;
 
         const newDigits = [...digits];
-        newDigits[index] = val.slice(-1);
+        newDigits[index] = val.slice(-1).toUpperCase();
         setDigits(newDigits);
         onChange(newDigits.join(''));
 
@@ -47,7 +47,7 @@ export default function OtpInput({ length = 6, value, onChange, error }: OtpInpu
 
     const handlePaste = (e: React.ClipboardEvent) => {
         e.preventDefault();
-        const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, length);
+        const pasted = e.clipboardData.getData('text').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, length);
         const newDigits = pasted.split('');
         const padded = [...newDigits, ...Array(length - newDigits.length).fill('')];
         setDigits(padded);
@@ -62,7 +62,7 @@ export default function OtpInput({ length = 6, value, onChange, error }: OtpInpu
                     key={i}
                     ref={(el) => { inputRefs.current[i] = el; }}
                     type="text"
-                    inputMode="numeric"
+                    inputMode="text"
                     maxLength={1}
                     value={digit}
                     onChange={(e) => handleChange(i, e.target.value)}

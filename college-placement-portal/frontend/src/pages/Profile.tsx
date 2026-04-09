@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import {
     User, GraduationCap, Link2, FileUp, Check, ChevronLeft,
     ArrowRight, AlertCircle, CheckCircle2, Lock, Trash2, Plus,
-    Briefcase, Award, Upload, MapPin, X, FileText
+    Briefcase, Award, Upload, MapPin, X, FileText, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
@@ -131,7 +131,7 @@ function validateYearGap(tenthYear: string, twelfthYear: string): { tenthYear?: 
 }
 
 export default function Profile() {
-    const { token } = useAuth();
+    const { token, user } = useAuth();
     const [step, setStep] = useState(0);
     const [profile, setProfile] = useState<any>(null);
     const [saving, setSaving] = useState(false);
@@ -143,6 +143,11 @@ export default function Profile() {
     const [photoBroken, setPhotoBroken] = useState(false);
     const [docImageBroken, setDocImageBroken] = useState<Record<string, boolean>>({});
     const [docPreviewBroken, setDocPreviewBroken] = useState(false);
+    const [spocAccess, setSpocAccess] = useState({
+        permJobCreate: !!user?.permJobCreate,
+        permLockProfile: !!user?.permLockProfile,
+        permExportCsv: !!user?.permExportCsv
+    });
 
     const [form, setForm] = useState({
         firstName: '', lastName: '', branch: '', course: '', scholarNo: '',
@@ -159,6 +164,7 @@ export default function Profile() {
     const headers = { Authorization: `Bearer ${token}` };
 
     useEffect(() => {
+        if (user?.role === 'SPOC') return;
         axios.get(`${API}/api/student/profile`, { headers })
             .then(r => {
                 const d = r.data.data;
@@ -177,7 +183,69 @@ export default function Profile() {
                 });
             })
             .catch(() => setError('Failed to load profile.'));
-    }, [token]);
+    }, [token, user?.role]);
+    useEffect(() => {
+        if (user?.role !== 'SPOC') return;
+        axios.get(`${API}/api/auth/me`, { headers })
+            .then((r) => {
+                const u = r.data?.user || {};
+                setSpocAccess({
+                    permJobCreate: !!u.permJobCreate,
+                    permLockProfile: !!u.permLockProfile,
+                    permExportCsv: !!u.permExportCsv
+                });
+            })
+            .catch(() => {
+                setSpocAccess({
+                    permJobCreate: !!user?.permJobCreate,
+                    permLockProfile: !!user?.permLockProfile,
+                    permExportCsv: !!user?.permExportCsv
+                });
+            });
+    }, [token, user?.role, user?.permJobCreate, user?.permLockProfile, user?.permExportCsv]);
+
+    if (user?.role === 'SPOC') {
+        return (
+            <>
+                <PageHeader
+                    title="SPOC Profile"
+                    subtitle="Your coordinator-managed access permissions"
+                    breadcrumbs={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Profile' }]}
+                />
+                <div className="bg-white rounded-xl border border-gray-200 p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                        <ShieldCheck className="w-5 h-5 text-primary-600" />
+                        <h3 className="text-lg font-semibold text-gray-900">Assigned Permissions</h3>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {[
+                            { key: 'permJobCreate', label: 'Post Jobs' },
+                            { key: 'permLockProfile', label: 'Lock Profiles' },
+                            { key: 'permExportCsv', label: 'Export CSV' }
+                        ].map((perm) => {
+                            const enabled = (spocAccess as any)[perm.key];
+                            return (
+                                <div
+                                    key={perm.key}
+                                    className={clsx(
+                                        'rounded-lg border p-4',
+                                        enabled
+                                            ? 'bg-emerald-50 border-emerald-200'
+                                            : 'bg-gray-50 border-gray-200'
+                                    )}
+                                >
+                                    <p className="text-sm font-semibold text-gray-800">{perm.label}</p>
+                                    <p className={clsx('text-xs mt-1 font-semibold', enabled ? 'text-emerald-700' : 'text-gray-500')}>
+                                        {enabled ? 'Granted by coordinator' : 'Not granted'}
+                                    </p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </>
+        );
+    }
 
     // Reset broken-image fallbacks after data changes
     useEffect(() => { setPhotoBroken(false); }, [profile?.photoPath]);

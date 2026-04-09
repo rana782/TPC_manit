@@ -13,10 +13,14 @@ router.get('/', getMyNotifications);
 router.post('/send', requireRole(['SPOC', 'COORDINATOR']), sendTemplateNotification);
 
 // Admin routes (COORDINATOR only)
-import { getNotificationLogs, getSettings, updateSettings } from '../controllers/notification.controller';
+import { getNotificationLogs, getSettings, updateSettings, getNotificationTemplates, upsertNotificationTemplate, publishPlacedStudentsWhatsApp, publishPlacedStudentsEmail } from '../controllers/notification.controller';
 
 router.get('/admin/logs', requireRole(['COORDINATOR']), getNotificationLogs);
 router.get('/admin/settings', requireRole(['COORDINATOR']), getSettings);
 router.patch('/admin/settings', requireRole(['COORDINATOR']), updateSettings);
+router.get('/admin/templates', requireRole(['COORDINATOR']), getNotificationTemplates);
+router.put('/admin/templates/:type', requireRole(['COORDINATOR']), upsertNotificationTemplate);
+router.post('/job/:job_id/publish-placed', requireRole(['COORDINATOR', 'SPOC']), publishPlacedStudentsWhatsApp);
+router.post('/job/:job_id/publish-placement-email', requireRole(['COORDINATOR', 'SPOC']), publishPlacedStudentsEmail);
 
 export default router;

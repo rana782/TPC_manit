@@ -6,6 +6,11 @@ interface User {
     id: string;
     email: string;
     role: string;
+    isVerified?: boolean;
+    verifiedAt?: string | null;
+    permJobCreate?: boolean;
+    permLockProfile?: boolean;
+    permExportCsv?: boolean;
 }
 
 interface AuthContextType {

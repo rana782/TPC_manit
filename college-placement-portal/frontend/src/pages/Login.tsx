@@ -17,6 +17,11 @@ export default function Login() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [googleLoading, setGoogleLoading] = useState(false);
+    const [spocGoogleLoading, setSpocGoogleLoading] = useState(false);
+    const [googleOtp, setGoogleOtp] = useState('');
+    const [pendingSpocEmail, setPendingSpocEmail] = useState('');
+    const [googleOtpLoading, setGoogleOtpLoading] = useState(false);
+    const [info, setInfo] = useState('');
     const navigate = useNavigate();
     const { login } = useAuth();
 
@@ -40,14 +45,23 @@ export default function Login() {
         }
     };
 
-    const handleGoogleLogin = async () => {
+    const handleGoogleLogin = async (asSpoc = false) => {
         setError('');
-        setGoogleLoading(true);
+        setInfo('');
+        if (asSpoc) setSpocGoogleLoading(true);
+        else setGoogleLoading(true);
         try {
+            const payload: Record<string, string> = { idToken: 'mock:student@example.com' };
+            if (asSpoc) payload.googleRole = 'SPOC';
             const res = await axios.post(`${getViteApiOrigin()}/api/auth/google`, {
-                idToken: 'mock:student@example.com'
+                ...payload
             });
             if (res.data.success) {
+                if (res.data.requiresOtp && res.data.flow === 'GOOGLE_SPOC_OTP') {
+                    setPendingSpocEmail(res.data.email || 'student@example.com');
+                    setInfo(res.data.message || 'OTP sent. Verify to create SPOC account.');
+                    return;
+                }
                 if (res.data.token) {
                     login(res.data.token, res.data.user);
                     navigate('/dashboard');
@@ -56,7 +70,36 @@ export default function Login() {
         } catch (err: any) {
             setError(err.response?.data?.message || 'Google Login failed.');
         } finally {
-            setGoogleLoading(false);
+            if (asSpoc) setSpocGoogleLoading(false);
+            else setGoogleLoading(false);
+        }
+    };
+
+    const handleVerifySpocOtp = async () => {
+        if (!pendingSpocEmail) {
+            setError('No pending SPOC verification found. Start Google sign-in again.');
+            return;
+        }
+        if (googleOtp.trim().length !== 6) {
+            setError('Enter a valid 6-character OTP.');
+            return;
+        }
+        setError('');
+        setInfo('');
+        setGoogleOtpLoading(true);
+        try {
+            const res = await axios.post(`${getViteApiOrigin()}/api/auth/google/verify-spoc-otp`, {
+                email: pendingSpocEmail,
+                otp: googleOtp.trim().toUpperCase(),
+            });
+            if (res.data.success && res.data.token) {
+                login(res.data.token, res.data.user);
+                navigate('/dashboard');
+            }
+        } catch (err: any) {
+            setError(err.response?.data?.message || 'Failed to verify OTP.');
+        } finally {
+            setGoogleOtpLoading(false);
         }
     };
 
@@ -76,6 +119,18 @@ export default function Login() {
                     >
                         <AlertCircle className="w-4 h-4 flex-shrink-0" />
                         {error}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+            <AnimatePresence>
+                {info && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="flex items-center gap-2 p-3 mb-6 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-sm"
+                    >
+                        {info}
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -159,7 +214,7 @@ export default function Login() {
                 type="button"
                 variant="google"
                 loading={googleLoading}
-                onClick={handleGoogleLogin}
+                onClick={() => handleGoogleLogin(false)}
                 icon={
                     !googleLoading ? (
                         <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -173,6 +228,33 @@ export default function Login() {
             >
                 Sign in with Google
             </Button>
+            <Button
+                type="button"
+                variant="outline"
+                loading={spocGoogleLoading}
+                onClick={() => handleGoogleLogin(true)}
+            >
+                Sign in with Google as SPOC (OTP)
+            </Button>
+
+            {pendingSpocEmail && (
+                <div className="space-y-3 mt-4 p-4 rounded-lg border border-blue-100 bg-blue-50/50">
+                    <p className="text-xs text-blue-700 font-medium">
+                        Verify SPOC OTP sent to <span className="font-semibold">{pendingSpocEmail}</span>
+                    </p>
+                    <Input
+                        label="6-character alphanumeric OTP"
+                        type="text"
+                        value={googleOtp}
+                        onChange={e => setGoogleOtp(e.target.value.toUpperCase())}
+                        placeholder="e.g. A7K2P9"
+                        maxLength={6}
+                    />
+                    <Button type="button" onClick={handleVerifySpocOtp} loading={googleOtpLoading}>
+                        Verify OTP and Create SPOC Account
+                    </Button>
+                </div>
+            )}
 
             {/* Register link */}
             <p className="text-center text-sm text-gray-500 mt-8">

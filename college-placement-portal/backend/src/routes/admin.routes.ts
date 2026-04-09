@@ -8,7 +8,7 @@ const router = Router();
 router.use(verifyToken);
 router.use(requireRole(['COORDINATOR']));
 
-import { getPendingSpocs, getApprovedSpocs, approveSpoc, updateSpocPermissions, overrideAction, listOverrides, revokeSpoc } from '../controllers/admin.controller';
+import { getPendingSpocs, getApprovedSpocs, approveSpoc, updateSpocPermissions, overrideAction, listOverrides, revokeSpoc, rejectPendingSpoc } from '../controllers/admin.controller';
 
 router.get('/stats', getStats);
 router.get('/users', listUsers);
@@ -19,6 +19,7 @@ router.patch('/users/:id/enable', enableUser);
 router.get('/spocs/pending', getPendingSpocs);
 router.get('/spocs/approved', getApprovedSpocs);
 router.patch('/spocs/:id/approve', approveSpoc);
+router.post('/spocs/:id/reject', rejectPendingSpoc);
 router.post('/spocs/:id/revoke', revokeSpoc);
 router.patch('/spocs/:id/permissions', updateSpocPermissions);
 

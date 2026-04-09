@@ -3,7 +3,11 @@
  */
 export function normalizeEnvKey(raw: string | undefined): string | undefined {
     if (raw == null || typeof raw !== 'string') return undefined;
-    const t = raw.replace(/^\uFEFF/, '').trim().replace(/^["']|["']$/g, '');
+    const t = raw
+        .replace(/^\uFEFF/, '')
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .replace(/^Bearer\s+/i, '');
     return t.length > 0 ? t : undefined;
 }
 
@@ -18,11 +22,22 @@ export function getOpenAiApiKey(): string | undefined {
 
 /** Preferred name — same as getOpenAiApiKey (legacy alias). */
 export function getAtsLlmApiKey(): string | undefined {
-    return (
-        normalizeEnvKey(process.env.ATS_LLM_API_KEY) ||
-        normalizeEnvKey(process.env.OPENROUTER_API_KEY) ||
-        normalizeEnvKey(process.env.OPENAI_API_KEY)
-    );
+    return getAtsLlmApiKeyCandidates()[0];
+}
+
+/** Ordered ATS key candidates for runtime fallback (stale key -> next key). */
+export function getAtsLlmApiKeyCandidates(): string[] {
+    const candidates = [
+        normalizeEnvKey(process.env.ATS_LLM_API_KEY),
+        normalizeEnvKey(process.env.OPENROUTER_API_KEY),
+        normalizeEnvKey(process.env.OPENAI_API_KEY),
+    ].filter((v): v is string => Boolean(v));
+
+    const out: string[] = [];
+    for (const k of candidates) {
+        if (!out.includes(k)) out.push(k);
+    }
+    return out;
 }
 
 /** OpenAI-compatible base URL (e.g. https://openrouter.ai/api/v1). Omit for api.openai.com. */

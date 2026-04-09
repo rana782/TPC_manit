@@ -130,8 +130,9 @@ export const enableUser = async (req: AuthRequest, res: Response) => {
 export const getPendingSpocs = async (req: AuthRequest, res: Response) => {
     try {
         const spocs = await prisma.user.findMany({
-            where: { role: 'SPOC', isVerified: false },
-            select: { id: true, email: true, createdAt: true, isDisabled: true }
+            // Pending for coordinator = email-verified SPOCs that are not yet approved by coordinator.
+            where: { role: 'SPOC', isVerified: true, verifiedAt: null },
+            select: { id: true, email: true, createdAt: true, isDisabled: true, isVerified: true }
         });
         res.json({ success: true, spocs });
     } catch (error) {
@@ -142,7 +143,7 @@ export const getPendingSpocs = async (req: AuthRequest, res: Response) => {
 export const getApprovedSpocs = async (req: AuthRequest, res: Response) => {
     try {
         const spocs = await prisma.user.findMany({
-            where: { role: 'SPOC', isVerified: true },
+            where: { role: 'SPOC', isVerified: true, verifiedAt: { not: null } },
             select: {
                 id: true, email: true, createdAt: true, isDisabled: true,
                 verifiedAt: true, verifiedBy: { select: { email: true } },
@@ -160,9 +161,14 @@ export const approveSpoc = async (req: AuthRequest, res: Response) => {
         const { id } = req.params;
         const coordinatorId = req.user?.id;
 
-        const spoc = await prisma.user.findUnique({ where: { id, role: 'SPOC' } });
-        if (!spoc) return res.status(404).json({ success: false, message: 'SPOC not found' });
-        if (spoc.isVerified) return res.status(400).json({ success: false, message: 'SPOC is already verified' });
+        const spoc = await prisma.user.findUnique({ where: { id } });
+        if (!spoc || spoc.role !== 'SPOC') return res.status(404).json({ success: false, message: 'SPOC not found' });
+        if (!spoc.isVerified) {
+            return res.status(400).json({ success: false, message: 'SPOC must complete email OTP verification first' });
+        }
+        if (spoc.verifiedAt) {
+            return res.status(400).json({ success: false, message: 'SPOC is already approved' });
+        }
 
         const updated = await prisma.user.update({
             where: { id },
@@ -170,9 +176,10 @@ export const approveSpoc = async (req: AuthRequest, res: Response) => {
                 isVerified: true,
                 verifiedById: coordinatorId,
                 verifiedAt: new Date(),
-                permJobCreate: true, // Default true on approve
-                permLockProfile: false, // Default false
-                permExportCsv: true // Default true
+                // Keep all permissions disabled by default after approval.
+                permJobCreate: false,
+                permLockProfile: false,
+                permExportCsv: false
             },
             select: { id: true, email: true, isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true }
         });
@@ -324,21 +331,34 @@ export const listOverrides = async (req: AuthRequest, res: Response) => {
 export const revokeSpoc = async (req: AuthRequest, res: Response) => {
     try {
         const { id } = req.params;
-        const spoc = await prisma.user.findUnique({ where: { id, role: 'SPOC' } });
+        const spoc = await prisma.user.findUnique({ where: { id } });
         if (!spoc) return res.status(404).json({ success: false, message: 'SPOC not found' });
+        if (spoc.role !== 'SPOC') return res.status(400).json({ success: false, message: 'Only SPOC accounts can be revoked here' });
 
-        await prisma.user.update({
-            where: { id },
-            data: {
-                isVerified: false,
-                permLockProfile: false,
-                permJobCreate: false,
-                permExportCsv: false
-            }
-        });
+        // Hard revoke: delete SPOC account and all related SPOC-owned data via relational cascades.
+        await prisma.user.delete({ where: { id } });
 
-        res.json({ success: true, message: 'SPOC permissions revoked and status set to unverified.' });
+        res.json({ success: true, message: 'SPOC revoked successfully. Account and related data deleted.' });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Failed to revoke SPOC' });
+    }
+};
+
+export const rejectPendingSpoc = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params;
+        const spoc = await prisma.user.findUnique({ where: { id } });
+        if (!spoc || spoc.role !== 'SPOC') {
+            return res.status(404).json({ success: false, message: 'SPOC not found' });
+        }
+        // Only pending entries can be rejected from pending queue.
+        if (!spoc.isVerified || spoc.verifiedAt) {
+            return res.status(400).json({ success: false, message: 'Only pending SPOC requests can be rejected' });
+        }
+
+        await prisma.user.delete({ where: { id } });
+        return res.json({ success: true, message: 'Pending SPOC request rejected and account deleted.' });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Failed to reject pending SPOC' });
     }
 };

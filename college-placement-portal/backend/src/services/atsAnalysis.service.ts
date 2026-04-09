@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import type { AtsResult } from './ats.service';
-import { getAtsChatModelCandidates, getAtsLlmBaseUrl, getOpenAiApiKey, isAtsUsingOpenRouter } from '../utils/env';
+import { getAtsChatModelCandidates, getAtsLlmApiKeyCandidates, getAtsLlmBaseUrl } from '../utils/env';
 
 const ATS_DEBUG = String(process.env.ATS_DEBUG || '').toLowerCase() === 'true';
 const ATS_TIMEOUT_MS = Number(process.env.ATS_TIMEOUT_MS || 12000);
@@ -412,10 +412,15 @@ function getLlmFailureReason(err: unknown): string {
     return 'LLM request failed';
 }
 
-function createAtsLlmClient(): OpenAI {
-    const apiKey = getOpenAiApiKey() || '';
-    const baseURL = getAtsLlmBaseUrl();
-    const timeoutMs = isAtsUsingOpenRouter() ? Math.max(ATS_TIMEOUT_MS, OPENROUTER_MIN_TIMEOUT_MS) : ATS_TIMEOUT_MS;
+function createAtsLlmClient(apiKey: string): OpenAI {
+    const configuredBase = getAtsLlmBaseUrl();
+    const keyLooksOpenRouter = apiKey.startsWith('sk-or-v1-');
+    const baseURL =
+        !keyLooksOpenRouter && configuredBase?.includes('openrouter.ai')
+            ? undefined
+            : configuredBase;
+    const usingOpenRouter = keyLooksOpenRouter || baseURL?.includes('openrouter.ai') === true;
+    const timeoutMs = usingOpenRouter ? Math.max(ATS_TIMEOUT_MS, OPENROUTER_MIN_TIMEOUT_MS) : ATS_TIMEOUT_MS;
     const opts: ConstructorParameters<typeof OpenAI>[0] = {
         apiKey,
         timeout: timeoutMs,
@@ -423,7 +428,7 @@ function createAtsLlmClient(): OpenAI {
     if (baseURL) {
         opts.baseURL = baseURL;
     }
-    if (baseURL?.includes('openrouter.ai')) {
+    if (usingOpenRouter) {
         const referer = process.env.OPENROUTER_HTTP_REFERER || process.env.PORT_UI_URL || 'http://localhost:3000';
         opts.defaultHeaders = {
             'HTTP-Referer': referer,
@@ -431,6 +436,19 @@ function createAtsLlmClient(): OpenAI {
         };
     }
     return new OpenAI(opts);
+}
+
+function shouldTryNextKey(err: unknown): boolean {
+    const e = err as any;
+    const status = Number(e?.status);
+    const code = String(e?.code || e?.error?.code || '').toLowerCase();
+    const msg = String(e?.message || '').toLowerCase();
+    return (
+        status === 401 ||
+        code === 'invalid_api_key' ||
+        msg.includes('invalid api key') ||
+        msg.includes('user not found')
+    );
 }
 
 /** Pull text from chat completion (handles string, content parts, some reasoning fields). */
@@ -461,14 +479,15 @@ function extractCompletionText(completion: OpenAI.Chat.Completions.ChatCompletio
  */
 async function chatCompletionWithJsonRetry(
     client: OpenAI,
-    args: Omit<OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, 'stream'>
+    args: Omit<OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, 'stream'>,
+    useOpenRouter: boolean
 ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
     const baseArgs = {
         ...args,
         max_tokens: args.max_tokens ?? 4096,
     };
 
-    if (isAtsUsingOpenRouter()) {
+    if (useOpenRouter) {
         if (ATS_DEBUG) {
             // eslint-disable-next-line no-console
             console.log('[ATS] OpenRouter/Qwen chat.completions (no response_format json_object)', {
@@ -497,6 +516,13 @@ async function chatCompletionWithJsonRetry(
     return client.chat.completions.create(baseArgs);
 }
 
+function getModelCandidatesForKey(apiKey: string): string[] {
+    const keyLooksOpenRouter = apiKey.startsWith('sk-or-v1-');
+    if (keyLooksOpenRouter) return getAtsChatModelCandidates();
+    const explicit = String(process.env.OPENAI_ATS_MODEL || '').trim();
+    return explicit ? [explicit, 'gpt-4o-mini'] : ['gpt-4o-mini'];
+}
+
 function warnAts(msg: string, err?: unknown): void {
     if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test') return;
     if (err !== undefined) {
@@ -515,13 +541,11 @@ function shouldTryNextModel(err: unknown): boolean {
 }
 
 async function analyzeWithOpenAI(resumeText: string, jobText: string): Promise<AtsAnalysisResult> {
-    const apiKey = getOpenAiApiKey();
-    if (!apiKey) {
+    const apiKeys = getAtsLlmApiKeyCandidates();
+    if (apiKeys.length === 0) {
         warnAts('Qwen/OpenRouter not called: set ATS_LLM_API_KEY (or OPENROUTER_API_KEY) in backend/.env and restart.');
         return buildFallbackAts('ATS_LLM / OPENAI API key not set');
     }
-
-    const openai = createAtsLlmClient();
     const prompt = buildPrompt(resumeText, jobText);
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         {
@@ -532,27 +556,35 @@ async function analyzeWithOpenAI(resumeText: string, jobText: string): Promise<A
         { role: 'user', content: prompt },
     ];
 
-    const candidates = getAtsChatModelCandidates();
     let lastErr: unknown;
-    for (const model of candidates) {
-        try {
-            const completion = await chatCompletionWithJsonRetry(openai, { model, messages, temperature: 0.2 });
-            const raw = extractCompletionText(completion);
-            const parsed = parseModelJson(raw);
-            const out = resultFromParsed(parsed);
-            if (!out) {
-                warnAts(`model returned non-JSON, trying next: ${model}`);
-                continue;
+    for (const apiKey of apiKeys) {
+        const openai = createAtsLlmClient(apiKey);
+        const useOpenRouter = apiKey.startsWith('sk-or-v1-');
+        const candidates = getModelCandidatesForKey(apiKey);
+        for (const model of candidates) {
+            try {
+                const completion = await chatCompletionWithJsonRetry(openai, { model, messages, temperature: 0.2 }, useOpenRouter);
+                const raw = extractCompletionText(completion);
+                const parsed = parseModelJson(raw);
+                const out = resultFromParsed(parsed);
+                if (!out) {
+                    warnAts(`model returned non-JSON, trying next: ${model}`);
+                    continue;
+                }
+                out.model = model;
+                return out;
+            } catch (err) {
+                lastErr = err;
+                if (shouldTryNextModel(err)) {
+                    warnAts(`model failed, trying next: ${model}`, err);
+                    continue;
+                }
+                if (shouldTryNextKey(err)) {
+                    warnAts(`key rejected, trying next key: ${model}`, err);
+                    break;
+                }
+                throw err;
             }
-            out.model = model;
-            return out;
-        } catch (err) {
-            lastErr = err;
-            if (shouldTryNextModel(err)) {
-                warnAts(`model failed, trying next: ${model}`, err);
-                continue;
-            }
-            throw err;
         }
     }
     if (lastErr) throw lastErr;
@@ -561,11 +593,12 @@ async function analyzeWithOpenAI(resumeText: string, jobText: string): Promise<A
 
 /** Parse uploaded resume text via LLM before ATS scoring. */
 export async function parseResumeWithLlm(resumeText: string): Promise<ParsedResumeForAts> {
-    const apiKey = getOpenAiApiKey();
-    if (!apiKey) {
-        throw new Error('ATS_LLM API key not set');
+    const apiKeys = getAtsLlmApiKeyCandidates();
+    const trimmedResume = String(resumeText || '').trim();
+    if (apiKeys.length === 0) {
+        warnAts('ATS resume parser fallback: API key not set. Using raw extracted resume text.');
+        return { normalizedText: trimmedResume };
     }
-    const openai = createAtsLlmClient();
     const prompt = buildResumeParsePrompt(resumeText);
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         {
@@ -576,39 +609,49 @@ export async function parseResumeWithLlm(resumeText: string): Promise<ParsedResu
         { role: 'user', content: prompt },
     ];
 
-    const candidates = getAtsChatModelCandidates();
     let lastErr: unknown;
-    for (const model of candidates) {
-        try {
-            const completion = await chatCompletionWithJsonRetry(openai, { model, messages, temperature: 0.1 });
-            const raw = extractCompletionText(completion);
-            const parsed = parseModelJson(raw);
-            const normalized = normalizeParsedResumeForAts(parsed);
-            if (!normalized) {
-                warnAts(`resume parser returned invalid JSON, trying next: ${model}`);
-                continue;
+    for (const apiKey of apiKeys) {
+        const openai = createAtsLlmClient(apiKey);
+        const useOpenRouter = apiKey.startsWith('sk-or-v1-');
+        const candidates = getModelCandidatesForKey(apiKey);
+        for (const model of candidates) {
+            try {
+                const completion = await chatCompletionWithJsonRetry(openai, { model, messages, temperature: 0.1 }, useOpenRouter);
+                const raw = extractCompletionText(completion);
+                const parsed = parseModelJson(raw);
+                const normalized = normalizeParsedResumeForAts(parsed);
+                if (!normalized) {
+                    warnAts(`resume parser returned invalid JSON, trying next: ${model}`);
+                    continue;
+                }
+                return { normalizedText: normalized, model };
+            } catch (err) {
+                lastErr = err;
+                if (shouldTryNextModel(err)) {
+                    warnAts(`resume parser model failed, trying next: ${model}`, err);
+                    continue;
+                }
+                if (shouldTryNextKey(err)) {
+                    warnAts(`resume parser key rejected, trying next key: ${model}`, err);
+                    break;
+                }
+                // Non-retryable provider/auth issues should not break ATS API.
+                // Degrade gracefully to extracted resume text and let scoring fallback handle provider failures.
+                warnAts(`resume parser non-retryable error, using raw resume text: ${model}`, err);
+                break;
             }
-            return { normalizedText: normalized, model };
-        } catch (err) {
-            lastErr = err;
-            if (shouldTryNextModel(err)) {
-                warnAts(`resume parser model failed, trying next: ${model}`, err);
-                continue;
-            }
-            throw err;
         }
     }
-    throw lastErr || new Error('Resume parsing via LLM failed');
+    warnAts('ATS resume parser fallback: LLM parsing failed. Using raw extracted resume text.', lastErr);
+    return { normalizedText: trimmedResume };
 }
 
 async function analyzeAbsoluteWithOpenAI(resumeText: string): Promise<AtsAbsoluteAnalysisResult> {
-    const apiKey = getOpenAiApiKey();
-    if (!apiKey) {
+    const apiKeys = getAtsLlmApiKeyCandidates();
+    if (apiKeys.length === 0) {
         warnAts('Qwen/OpenRouter not called: set ATS_LLM_API_KEY (or OPENROUTER_API_KEY) in backend/.env and restart.');
         return buildFallbackAbsoluteAts('ATS_LLM / OPENAI API key not set');
     }
-
-    const openai = createAtsLlmClient();
     const prompt = buildAbsolutePrompt(resumeText);
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         {
@@ -619,27 +662,35 @@ async function analyzeAbsoluteWithOpenAI(resumeText: string): Promise<AtsAbsolut
         { role: 'user', content: prompt },
     ];
 
-    const candidates = getAtsChatModelCandidates();
     let lastErr: unknown;
-    for (const model of candidates) {
-        try {
-            const completion = await chatCompletionWithJsonRetry(openai, { model, messages, temperature: 0.2 });
-            const raw = extractCompletionText(completion);
-            const parsed = parseModelJson(raw);
-            const out = absoluteFromParsed(parsed);
-            if (!out) {
-                warnAts(`absolute model returned non-JSON, trying next: ${model}`);
-                continue;
+    for (const apiKey of apiKeys) {
+        const openai = createAtsLlmClient(apiKey);
+        const useOpenRouter = apiKey.startsWith('sk-or-v1-');
+        const candidates = getModelCandidatesForKey(apiKey);
+        for (const model of candidates) {
+            try {
+                const completion = await chatCompletionWithJsonRetry(openai, { model, messages, temperature: 0.2 }, useOpenRouter);
+                const raw = extractCompletionText(completion);
+                const parsed = parseModelJson(raw);
+                const out = absoluteFromParsed(parsed);
+                if (!out) {
+                    warnAts(`absolute model returned non-JSON, trying next: ${model}`);
+                    continue;
+                }
+                out.model = model;
+                return out;
+            } catch (err) {
+                lastErr = err;
+                if (shouldTryNextModel(err)) {
+                    warnAts(`absolute model failed, trying next: ${model}`, err);
+                    continue;
+                }
+                if (shouldTryNextKey(err)) {
+                    warnAts(`absolute key rejected, trying next key: ${model}`, err);
+                    break;
+                }
+                throw err;
             }
-            out.model = model;
-            return out;
-        } catch (err) {
-            lastErr = err;
-            if (shouldTryNextModel(err)) {
-                warnAts(`absolute model failed, trying next: ${model}`, err);
-                continue;
-            }
-            throw err;
         }
     }
     if (lastErr) throw lastErr;

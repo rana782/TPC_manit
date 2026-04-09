@@ -269,7 +269,17 @@ export const getJob = async (req: AuthRequest, res: Response) => {
                 },
                 include: {
                     student: {
-                        select: { id: true, firstName: true, lastName: true, scholarNo: true, branch: true, isLocked: true, lockedReason: true }
+                        select: {
+                            id: true,
+                            firstName: true,
+                            lastName: true,
+                            scholarNo: true,
+                            branch: true,
+                            isLocked: true,
+                            lockedReason: true,
+                            linkedin: true,
+                            photoPath: true
+                        }
                     }
                 }
             };
@@ -586,7 +596,7 @@ export const getStudentJobDetails = async (req: AuthRequest, res: Response) => {
     }
 };
 
-import { enqueueAndSend, sendWhatsApp } from '../services/notification.service';
+import { enqueueAndSend, sendPlacementResultEmailWebhook, sendWhatsApp } from '../services/notification.service';
 import { createAnnouncement } from '../services/announcement.service';
 import { publishLinkedInAnnouncement } from '../services/linkedin.service';
 
@@ -1278,7 +1288,16 @@ export const declareResults = async (req: AuthRequest, res: Response) => {
                 studentId: true,
                 currentStageIndex: true,
                 status: true,
-                student: { select: { userId: true, firstName: true, lastName: true, branch: true, linkedin: true } }
+                student: {
+                    select: {
+                        userId: true,
+                        firstName: true,
+                        lastName: true,
+                        branch: true,
+                        linkedin: true,
+                        user: { select: { email: true } }
+                    }
+                }
             }
         });
 
@@ -1365,6 +1384,35 @@ export const declareResults = async (req: AuthRequest, res: Response) => {
                 }))
             });
         });
+
+        // WhatsApp automation (Zapier/Twilio webhook):
+        // fire per newly placed student, similar to LinkedIn publish workflow.
+        await Promise.allSettled(
+            selectedApplications.map((app) =>
+                sendWhatsApp(app.student.userId, job.id, 'PLACED_STUDENT_CONGRATS', {
+                    company_name: job.companyName,
+                    role: job.role,
+                    status: 'PLACED'
+                })
+            )
+        );
+
+        // Email automation webhook payload for Zapier (placement result emails).
+        await Promise.allSettled(
+            selectedApplications.map((app) =>
+                sendPlacementResultEmailWebhook({
+                    userId: app.student.userId,
+                    jobId: job.id,
+                    studentEmail: String(app.student.user?.email || ''),
+                    studentName: `${app.student.firstName} ${app.student.lastName}`.trim(),
+                    companyName: job.companyName,
+                    role: job.role,
+                    ctc: job.ctc || 'N/A',
+                    status: 'PLACED',
+                    placementYear
+                })
+            )
+        );
 
         res.json({ success: true, message: 'Placed students declared successfully', placedCount: uniqueStudentIds.length });
     } catch (error) {

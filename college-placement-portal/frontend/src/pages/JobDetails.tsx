@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
@@ -10,7 +10,7 @@ import {
     ArrowLeft, Calendar, Users, Plus, Search, ArrowUpDown,
     CheckCircle2, Clock, AlertCircle, X, Award, Sparkles, Shield,
     ChevronRight, ChevronDown, ChevronUp, User, FileText, Lock, Unlock, GraduationCap, UserMinus, Upload, MessageSquare,
-    Pencil, Trash2
+    Pencil, Trash2, Linkedin, Copy, Send
 } from 'lucide-react';
 
 interface JobApplication {
@@ -23,6 +23,8 @@ interface JobApplication {
         branch?: string | null;
         isLocked?: boolean;
         lockedReason?: string | null;
+        linkedin?: string | null;
+        photoPath?: string | null;
     };
     status: string;
     atsScore: number;
@@ -91,6 +93,13 @@ function parseJsonArray(value: unknown): string[] {
 /** Backend serves `/uploads/...` from API origin (not under `/api`). */
 function stageUploadUrl(path: string | null | undefined): string {
     if (!path) return '#';
+    if (path.startsWith('http')) return path;
+    const o = getViteApiOrigin();
+    return o ? `${o}${path}` : path;
+}
+
+function studentPhotoUrl(path: string | null | undefined): string | null {
+    if (!path) return null;
     if (path.startsWith('http')) return path;
     const o = getViteApiOrigin();
     return o ? `${o}${path}` : path;
@@ -226,6 +235,21 @@ export default function JobDetails() {
     const [editStageError, setEditStageError] = useState('');
     const [stageDeleteConfirm, setStageDeleteConfirm] = useState<JobStage | null>(null);
     const [deleteStageLoading, setDeleteStageLoading] = useState(false);
+    const [captionTemplate, setCaptionTemplate] = useState('');
+    const [captionTouched, setCaptionTouched] = useState(false);
+    const [publishLoading, setPublishLoading] = useState(false);
+    const [publishError, setPublishError] = useState('');
+    const [publishMessage, setPublishMessage] = useState('');
+    const [whatsAppTemplate, setWhatsAppTemplate] = useState('');
+    const [whatsAppTouched, setWhatsAppTouched] = useState(false);
+    const [whatsAppPublishLoading, setWhatsAppPublishLoading] = useState(false);
+    const [whatsAppPublishError, setWhatsAppPublishError] = useState('');
+    const [whatsAppPublishMessage, setWhatsAppPublishMessage] = useState('');
+    const [emailTemplate, setEmailTemplate] = useState('');
+    const [emailTouched, setEmailTouched] = useState(false);
+    const [emailPublishLoading, setEmailPublishLoading] = useState(false);
+    const [emailPublishError, setEmailPublishError] = useState('');
+    const [emailPublishMessage, setEmailPublishMessage] = useState('');
 
     const apiBase = getViteApiBase();
     const token = localStorage.getItem('token');
@@ -268,6 +292,150 @@ export default function JobDetails() {
     useEffect(() => {
         fetchJob();
     }, [id]);
+
+    const placedStudentsForCompany = useMemo(() => {
+        if (!job) return [];
+        const placed = (job.applications || []).filter((app) => String(app.status || '').toUpperCase() === 'PLACED');
+        const uniqueByStudent = new Map<string, JobApplication>();
+        for (const app of placed) {
+            if (!uniqueByStudent.has(app.student.id)) uniqueByStudent.set(app.student.id, app);
+        }
+        return Array.from(uniqueByStudent.values());
+    }, [job]);
+
+    const generatedCongratsTemplate = useMemo(() => {
+        if (!job) return '';
+        const lines = placedStudentsForCompany
+            .map((app) => {
+                const highlightedName = `${app.student.firstName} ${app.student.lastName}`.trim().toUpperCase();
+                const profile = String(app.student.linkedin || '').trim();
+                const linkLine = profile ? `\n  🔗 ${profile}` : '';
+                return `• ${highlightedName} (${app.student.branch || 'N/A'}) — ${job.role} @ ${job.ctc || 'N/A'}${linkLine}`;
+            })
+            .join('\n');
+        return `🎉 Congratulations from TPC! 🎉\nWe're thrilled to share this update.\nThe following students have been placed at ${job.companyName}:\n${lines || '• (No placed students yet)'}\n#Placements #TPCC #PlacementDrive`;
+    }, [job, placedStudentsForCompany]);
+
+    const generatedWhatsAppTemplate = useMemo(() => {
+        if (!job) return '';
+        return `We're thrilled to share this, {student_name}! 🎉 You are placed at ${job.companyName} for the role of ${job.role}. Please check the portal for next steps. - TPCC`;
+    }, [job]);
+
+    const generatedEmailTemplate = useMemo(() => {
+        if (!job) return '';
+        return `We're thrilled to share this, {student_name}! 🎉 Congratulations on being placed at ${job.companyName} as ${job.role}. With a CTC of ${job.ctc || 'N/A'}, this achievement reflects your dedication and talent. Please send your acceptance at tpwnitb@gmail.com.`;
+    }, [job]);
+
+    useEffect(() => {
+        if (!captionTouched) {
+            setCaptionTemplate(generatedCongratsTemplate);
+        }
+    }, [generatedCongratsTemplate, captionTouched]);
+
+    useEffect(() => {
+        if (!whatsAppTouched) {
+            setWhatsAppTemplate(generatedWhatsAppTemplate);
+        }
+    }, [generatedWhatsAppTemplate, whatsAppTouched]);
+
+    useEffect(() => {
+        if (!emailTouched) {
+            setEmailTemplate(generatedEmailTemplate);
+        }
+    }, [generatedEmailTemplate, emailTouched]);
+
+    const publishCompanyAnnouncement = async () => {
+        if (!id || !token) return;
+        if (!(user?.role === 'COORDINATOR' || user?.role === 'SPOC')) {
+            setPublishError('Only SPOC or coordinator can publish LinkedIn announcements.');
+            return;
+        }
+        if (!placedStudentsForCompany.length) {
+            setPublishError('No placed students found for this company yet.');
+            return;
+        }
+        if (!captionTemplate.trim()) {
+            setPublishError('Caption template cannot be empty.');
+            return;
+        }
+        setPublishLoading(true);
+        setPublishError('');
+        setPublishMessage('');
+        try {
+            const res = await axios.post(
+                `${apiBase}/announcements/job/${id}/publish`,
+                { post_template: captionTemplate.trim() },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            setPublishMessage(res.data?.message || 'Announcement published.');
+        } catch (err: any) {
+            setPublishError(err.response?.data?.message || 'Failed to publish announcement');
+        } finally {
+            setPublishLoading(false);
+        }
+    };
+
+    const publishPlacedStudentsWhatsApp = async () => {
+        if (!id || !token) return;
+        if (!(user?.role === 'COORDINATOR' || user?.role === 'SPOC')) {
+            setWhatsAppPublishError('Only SPOC or coordinator can publish WhatsApp notifications.');
+            return;
+        }
+        if (!placedStudentsForCompany.length) {
+            setWhatsAppPublishError('No placed students found for this company yet.');
+            return;
+        }
+        if (!whatsAppTemplate.trim()) {
+            setWhatsAppPublishError('WhatsApp template cannot be empty.');
+            return;
+        }
+        setWhatsAppPublishLoading(true);
+        setWhatsAppPublishError('');
+        setWhatsAppPublishMessage('');
+        try {
+            const res = await axios.post(
+                `${apiBase}/notifications/job/${id}/publish-placed`,
+                { post_template: whatsAppTemplate.trim() },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            setWhatsAppPublishMessage(res.data?.message || 'WhatsApp notifications published.');
+        } catch (err: any) {
+            setWhatsAppPublishError(err.response?.data?.message || 'Failed to publish WhatsApp notifications');
+        } finally {
+            setWhatsAppPublishLoading(false);
+        }
+    };
+
+    const publishPlacedStudentsEmail = async () => {
+        if (!id || !token) return;
+        if (!(user?.role === 'COORDINATOR' || user?.role === 'SPOC')) {
+            setEmailPublishError('Only SPOC or coordinator can publish email notifications.');
+            return;
+        }
+        if (!placedStudentsForCompany.length) {
+            setEmailPublishError('No placed students found for this company yet.');
+            return;
+        }
+        if (!emailTemplate.trim()) {
+            setEmailPublishError('Email template cannot be empty.');
+            return;
+        }
+        setEmailPublishLoading(true);
+        setEmailPublishError('');
+        setEmailPublishMessage('');
+        try {
+            const res = await axios.post(
+                `${apiBase}/notifications/job/${id}/publish-placement-email`,
+                { post_template: emailTemplate.trim() },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            setEmailPublishMessage(res.data?.message || 'Placement-result emails published.');
+        } catch (err: any) {
+            setEmailPublishError(err.response?.data?.message || 'Failed to publish placement-result emails');
+        } finally {
+            setEmailPublishLoading(false);
+        }
+    };
 
     const addStage = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -1143,6 +1311,231 @@ export default function JobDetails() {
                             </div>
                         </div>
                     )}
+
+                    {/* Placed list + editable LinkedIn caption */}
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5" data-testid="placed-company-panel">
+                        <div className="flex items-center justify-between gap-3 mb-4">
+                            <div>
+                                <h3 className="text-base font-bold text-gray-900">Placed at {job.companyName}</h3>
+                                <p className="text-xs text-gray-500">
+                                    Extracted placed students for this company with profile and LinkedIn.
+                                </p>
+                            </div>
+                            <span className="text-xs font-bold text-violet-700 bg-violet-50 border border-violet-200 px-2 py-1 rounded-lg">
+                                {placedStudentsForCompany.length} placed
+                            </span>
+                        </div>
+
+                        {placedStudentsForCompany.length === 0 ? (
+                            <p className="text-sm text-gray-500 border border-dashed border-gray-200 rounded-xl p-4 bg-gray-50">
+                                No placed students yet. Declare placed students first to build the company announcement list.
+                            </p>
+                        ) : (
+                            <div className="space-y-2 mb-4">
+                                {placedStudentsForCompany.map((app) => {
+                                    const photoUrl = studentPhotoUrl(app.student.photoPath);
+                                    const linkedIn = (app.student.linkedin || '').trim();
+                                    return (
+                                        <div
+                                            key={`placed-${app.student.id}`}
+                                            className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 p-3"
+                                            data-testid="placed-company-student-row"
+                                        >
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                {photoUrl ? (
+                                                    <img
+                                                        src={photoUrl}
+                                                        alt={`${app.student.firstName} ${app.student.lastName}`}
+                                                        className="w-10 h-10 rounded-full object-cover border border-gray-200"
+                                                    />
+                                                ) : (
+                                                    <div className="w-10 h-10 rounded-full bg-primary-50 border border-primary-100 flex items-center justify-center text-xs font-black text-primary-700">
+                                                        {`${app.student.firstName?.[0] || ''}${app.student.lastName?.[0] || ''}`.toUpperCase()}
+                                                    </div>
+                                                )}
+                                                <div className="min-w-0">
+                                                    <p className="text-sm font-bold text-gray-900 truncate">
+                                                        {app.student.firstName} {app.student.lastName}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 truncate">
+                                                        {app.student.branch || 'N/A'} • {job.role}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {linkedIn ? (
+                                                <a
+                                                    href={linkedIn}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    title="Open LinkedIn profile"
+                                                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                                                    data-testid="placed-student-linkedin"
+                                                >
+                                                    <Linkedin className="w-4 h-4" />
+                                                </a>
+                                            ) : (
+                                                <span className="text-[11px] text-gray-400">No LinkedIn</span>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-gray-600 uppercase tracking-wide">Editable congratulations caption</label>
+                            <textarea
+                                rows={6}
+                                value={captionTemplate}
+                                onChange={(e) => {
+                                    setCaptionTemplate(e.target.value);
+                                    setCaptionTouched(true);
+                                }}
+                                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10 focus:outline-none"
+                                data-testid="linkedin-caption-template"
+                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        try {
+                                            await navigator.clipboard.writeText(captionTemplate);
+                                            setPublishMessage('Caption copied to clipboard.');
+                                            setPublishError('');
+                                        } catch {
+                                            setPublishError('Failed to copy caption.');
+                                        }
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-bold text-gray-700 hover:bg-gray-50"
+                                >
+                                    <Copy className="w-3.5 h-3.5" /> Copy Caption
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setCaptionTemplate(generatedCongratsTemplate);
+                                        setCaptionTouched(false);
+                                        setPublishError('');
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-bold text-gray-700 hover:bg-gray-50"
+                                >
+                                    Reset Template
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={publishLoading || !placedStudentsForCompany.length || !(user?.role === 'COORDINATOR' || user?.role === 'SPOC')}
+                                    onClick={publishCompanyAnnouncement}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary-600 text-white text-xs font-bold hover:bg-primary-700 disabled:opacity-60"
+                                    data-testid="publish-linkedin-btn"
+                                >
+                                    <Send className="w-3.5 h-3.5" />
+                                    {publishLoading ? 'Publishing...' : 'Publish to LinkedIn'}
+                                </button>
+                            </div>
+                            {!(user?.role === 'COORDINATOR' || user?.role === 'SPOC') && (
+                                <p className="text-xs text-amber-700">
+                                    Only SPOC or coordinator can publish on LinkedIn.
+                                </p>
+                            )}
+                            {publishError && <p className="text-xs font-semibold text-red-700">{publishError}</p>}
+                            {publishMessage && <p className="text-xs font-semibold text-emerald-700">{publishMessage}</p>}
+                        </div>
+
+                        <div className="mt-5 pt-5 border-t border-gray-100 space-y-2">
+                            <label className="text-xs font-bold text-gray-600 uppercase tracking-wide">Personal WhatsApp message template</label>
+                            <p className="text-xs text-gray-500">
+                                Use placeholders like <code>{'{student_name}'}</code>, <code>{'{company_name}'}</code>, <code>{'{role}'}</code>, <code>{'{status}'}</code>.
+                                This will be sent individually to each placed student.
+                            </p>
+                            <textarea
+                                rows={4}
+                                value={whatsAppTemplate}
+                                onChange={(e) => {
+                                    setWhatsAppTemplate(e.target.value);
+                                    setWhatsAppTouched(true);
+                                }}
+                                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10 focus:outline-none"
+                                data-testid="whatsapp-caption-template"
+                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setWhatsAppTemplate(generatedWhatsAppTemplate);
+                                        setWhatsAppTouched(false);
+                                        setWhatsAppPublishError('');
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-bold text-gray-700 hover:bg-gray-50"
+                                >
+                                    Reset WhatsApp Template
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={whatsAppPublishLoading || !placedStudentsForCompany.length || !(user?.role === 'COORDINATOR' || user?.role === 'SPOC')}
+                                    onClick={publishPlacedStudentsWhatsApp}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-60"
+                                    data-testid="publish-whatsapp-btn"
+                                >
+                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    {whatsAppPublishLoading ? 'Publishing...' : 'Publish to WhatsApp'}
+                                </button>
+                            </div>
+                            {!(user?.role === 'COORDINATOR' || user?.role === 'SPOC') && (
+                                <p className="text-xs text-amber-700">
+                                    Only SPOC or coordinator can publish WhatsApp notifications.
+                                </p>
+                            )}
+                            {whatsAppPublishError && <p className="text-xs font-semibold text-red-700">{whatsAppPublishError}</p>}
+                            {whatsAppPublishMessage && <p className="text-xs font-semibold text-emerald-700">{whatsAppPublishMessage}</p>}
+                        </div>
+
+                        <div className="mt-5 pt-5 border-t border-gray-100 space-y-2">
+                            <label className="text-xs font-bold text-gray-600 uppercase tracking-wide">Placement result email template</label>
+                            <p className="text-xs text-gray-500">
+                                Email webhook payload will include this text and personalized student details for Zap email delivery.
+                            </p>
+                            <textarea
+                                rows={4}
+                                value={emailTemplate}
+                                onChange={(e) => {
+                                    setEmailTemplate(e.target.value);
+                                    setEmailTouched(true);
+                                }}
+                                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10 focus:outline-none"
+                                data-testid="email-template"
+                            />
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setEmailTemplate(generatedEmailTemplate);
+                                        setEmailTouched(false);
+                                        setEmailPublishError('');
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-bold text-gray-700 hover:bg-gray-50"
+                                >
+                                    Reset Email Template
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={emailPublishLoading || !placedStudentsForCompany.length || !(user?.role === 'COORDINATOR' || user?.role === 'SPOC')}
+                                    onClick={publishPlacedStudentsEmail}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:opacity-60"
+                                    data-testid="publish-email-btn"
+                                >
+                                    <Send className="w-3.5 h-3.5" />
+                                    {emailPublishLoading ? 'Publishing...' : 'Publish Placement Emails'}
+                                </button>
+                            </div>
+                            {!(user?.role === 'COORDINATOR' || user?.role === 'SPOC') && (
+                                <p className="text-xs text-amber-700">
+                                    Only SPOC or coordinator can publish email notifications.
+                                </p>
+                            )}
+                            {emailPublishError && <p className="text-xs font-semibold text-red-700">{emailPublishError}</p>}
+                            {emailPublishMessage && <p className="text-xs font-semibold text-emerald-700">{emailPublishMessage}</p>}
+                        </div>
+                    </div>
                 </div>
 
                 {/* === RIGHT PANEL: Timeline + Results === */}

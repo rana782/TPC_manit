@@ -13,7 +13,7 @@ router.post('/', requireRole(['SPOC', 'COORDINATOR']), createAnnouncement);
 router.get('/logs', requireRole(['SPOC', 'COORDINATOR']), getAnnouncementLogs);
 
 // MODULE 11: LinkedIn / Zapier Placement Announcements
-router.post('/job/:job_id/publish', requireRole(['COORDINATOR']), publishAnnouncement);
+router.post('/job/:job_id/publish', requireRole(['COORDINATOR', 'SPOC']), publishAnnouncement);
 router.get('/linkedin/logs', requireRole(['COORDINATOR']), getLinkedInLogs);
 router.get('/linkedin/settings', requireRole(['COORDINATOR']), getLinkedInSettings);
 router.patch('/linkedin/settings', requireRole(['COORDINATOR']), updateLinkedInSettings);

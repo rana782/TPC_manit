@@ -30,9 +30,17 @@ describe('Module 09 - SPOC Validation & Coordinator Overrides', () => {
         coordinatorId = coordinator.id;
         coordinatorToken = signToken(coordinator.id, coordinator.email, 'COORDINATOR');
 
-        // Create SPOC (unverified logic)
+        // Create SPOC (email-verified but not coordinator-approved yet)
         const spoc = await prisma.user.create({
-            data: { email: 'spoc_override@test.com', password: 'hash', role: 'SPOC', isVerified: false }
+            data: {
+                email: 'spoc_override@test.com',
+                password: 'hash',
+                role: 'SPOC',
+                isVerified: true,
+                permJobCreate: false,
+                permLockProfile: false,
+                permExportCsv: false,
+            }
         });
         spocId = spoc.id;
         spocToken = signToken(spoc.id, spoc.email, 'SPOC');
@@ -62,7 +70,7 @@ describe('Module 09 - SPOC Validation & Coordinator Overrides', () => {
     });
 
     describe('SPOC Verification Enforcement', () => {
-        it('should prevent unverified SPOC from creating a job', async () => {
+        it('should prevent unapproved/no-permission SPOC from creating a job', async () => {
             const res = await request(app)
                 .post('/api/jobs')
                 .set('Authorization', `Bearer ${spocToken}`)
@@ -74,7 +82,7 @@ describe('Module 09 - SPOC Validation & Coordinator Overrides', () => {
                 });
             expect(res.status).toBe(403);
             expect(res.body.success).toBe(false);
-            expect(res.body.message).toMatch(/verified by admin first/);
+            expect(res.body.message).toMatch(/verified by admin first|permission to create jobs/);
         });
 
         it('should fetch pending SPOCs', async () => {
@@ -93,11 +101,34 @@ describe('Module 09 - SPOC Validation & Coordinator Overrides', () => {
                 .send();
             expect(res.status).toBe(200);
             expect(res.body.spoc.isVerified).toBe(true);
-            expect(res.body.spoc.permJobCreate).toBe(true);
+            expect(res.body.spoc.permJobCreate).toBe(false);
             expect(res.body.spoc.permLockProfile).toBe(false);
         });
 
-        it('should allow verified SPOC to create a job', async () => {
+        it('should still deny creating job right after approval (default no permissions)', async () => {
+            const res = await request(app)
+                .post('/api/jobs')
+                .set('Authorization', `Bearer ${spocToken}`)
+                .send({
+                    role: 'SDE',
+                    companyName: 'Test Inc',
+                    description: 'Testing Job Desc',
+                    applicationDeadline: new Date(Date.now() + 86400000).toISOString()
+                });
+            expect(res.status).toBe(403);
+            expect(res.body.message).toMatch(/permission to create jobs/);
+        });
+
+        it('should allow Coordinator to grant job-create permission to SPOC', async () => {
+            const res = await request(app)
+                .patch(`/api/admin/spocs/${spocId}/permissions`)
+                .set('Authorization', `Bearer ${coordinatorToken}`)
+                .send({ permJobCreate: true });
+            expect(res.status).toBe(200);
+            expect(res.body.spoc.permJobCreate).toBe(true);
+        });
+
+        it('should allow SPOC to create a job after permission granted', async () => {
             const res = await request(app)
                 .post('/api/jobs')
                 .set('Authorization', `Bearer ${spocToken}`)
@@ -136,7 +167,7 @@ describe('Module 09 - SPOC Validation & Coordinator Overrides', () => {
                 .post(`/api/profile-lock/${studentId}/lock`)
                 .set('Authorization', `Bearer ${spocToken}`)
                 .send({ lockType: 'DEBARRED', reason: 'Misbehavior' });
-            expect(res.status).toBe(201);
+            expect(res.status).toBe(200);
             expect(res.body.success).toBe(true);
         });
     });

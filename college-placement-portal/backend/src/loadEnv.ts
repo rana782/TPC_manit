@@ -6,6 +6,12 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 
+const originalProcessSecrets = {
+    ATS_LLM_API_KEY: process.env.ATS_LLM_API_KEY,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+};
+
 function uniqueEnvPathsInLoadOrder(): string[] {
     const ordered = [
         path.join(process.cwd(), '.env'),
@@ -63,6 +69,15 @@ function manualInjectLlmKeys(): void {
 }
 
 loadDotenvFiles();
+
+// Preserve explicitly provided process secrets (e.g. shell/CI/system env),
+// even though dotenv loads files with override=true.
+for (const [k, v] of Object.entries(originalProcessSecrets)) {
+    if (typeof v === 'string' && v.trim().length > 0) {
+        process.env[k] = v;
+    }
+}
+
 manualInjectLlmKeys();
 
 const hasLlmKey = Boolean(

@@ -12,6 +12,8 @@ export interface PlacedStudentInfo {
 }
 
 export interface LinkedInPayload {
+    // Zapier LinkedIn step should map this field to Comment.
+    comment: string;
     company_name: string;
     job_id: string;
     placement_year: number;
@@ -21,14 +23,29 @@ export interface LinkedInPayload {
 
 const buildPostTemplate = (companyName: string, students: PlacedStudentInfo[]): string => {
     const placedList = students
-        .map(s => `• ${s.name} (${s.branch}) — ${s.role} @ ${s.ctc}`)
+        .map((s) => {
+            const highlightedName = String(s.name || '').toUpperCase();
+            const profile = String(s.linkedin_url || '').trim();
+            const linkLine = profile ? `\n  🔗 ${profile}` : '';
+            return `• ${highlightedName} (${s.branch}) — ${s.role} @ ${s.ctc}${linkLine}`;
+        })
         .join('\n');
     return `🎉 Placement Announcement 🎉\nWe are proud to announce that the following students have been placed at ${companyName}:\n${placedList}\n#Placements #TPCC #PlacementDrive`;
 };
 
+const hasNonEmptyPostTemplate = (value: string | null | undefined): boolean =>
+    typeof value === 'string' && value.trim().length > 0;
+
+const normalizeForDuplicateCheck = (value: string): string =>
+    String(value || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
 export const publishLinkedInAnnouncement = async (
     jobId: string,
-    coordinatorUserId: string
+    coordinatorUserId: string,
+    customPostTemplate?: string
 ): Promise<{ success: boolean; log: any }> => {
     // 1. Fetch job and all placement records with student profiles
     const job = await prisma.job.findUnique({
@@ -58,9 +75,12 @@ export const publishLinkedInAnnouncement = async (
     }));
 
     const placementYear = new Date().getFullYear();
-    const postTemplate = buildPostTemplate(job.companyName, placedStudents);
+    const generatedTemplate = buildPostTemplate(job.companyName, placedStudents);
+    const postTemplate =
+        hasNonEmptyPostTemplate(customPostTemplate) ? String(customPostTemplate).trim() : generatedTemplate;
 
     const payload: LinkedInPayload = {
+        comment: postTemplate,
         company_name: job.companyName,
         job_id: job.id,
         placement_year: placementYear,
@@ -81,20 +101,52 @@ export const publishLinkedInAnnouncement = async (
     let zapStatus = 'MOCKED';
     let responseBody: string | null = null;
 
-    if (isEnabled) {
-        const webhookUrl = process.env.ZAPIER_WEBHOOK_URL;
-        if (webhookUrl) {
+    if (!hasNonEmptyPostTemplate(payload.post_template)) {
+        zapStatus = 'FAILED';
+        responseBody = 'Skipped webhook: post_template is empty.';
+        console.warn('[LINKEDIN] Skipped webhook because post_template is empty.');
+    } else if (isEnabled) {
+        // Prevent duplicate text from reaching LinkedIn (common "Content is a duplicate" failure).
+        const recentSuccessLogs = await prisma.placementAnnouncementLog.findMany({
+            where: { jobId: job.id, zapStatus: 'SUCCESS' },
+            orderBy: { createdAt: 'desc' },
+            take: 20,
+            select: { payload: true }
+        });
+        const currentNormalized = normalizeForDuplicateCheck(payload.post_template);
+        const duplicateFound = recentSuccessLogs.some((log) => {
             try {
-                const response = await axios.post(webhookUrl, payload);
-                zapStatus = 'SUCCESS';
-                responseBody = JSON.stringify(response.data);
-            } catch (err: any) {
-                zapStatus = 'FAILED';
-                responseBody = err?.message || 'Webhook POST failed';
-                console.error('[LINKEDIN] Zapier webhook failed:', err?.message);
+                const parsed = JSON.parse(log.payload || '{}');
+                const previous =
+                    typeof parsed?.comment === 'string'
+                        ? parsed.comment
+                        : typeof parsed?.post_template === 'string'
+                          ? parsed.post_template
+                          : '';
+                return normalizeForDuplicateCheck(previous) === currentNormalized;
+            } catch {
+                return false;
             }
+        });
+
+        if (duplicateFound) {
+            zapStatus = 'FAILED';
+            responseBody = 'Duplicate content prevented before webhook call. Edit the caption template and publish again.';
         } else {
-            console.log('[LINKEDIN-MOCK] ZAPIER_WEBHOOK_URL not set. Payload:', JSON.stringify(payload, null, 2));
+            const webhookUrl = process.env.ZAPIER_WEBHOOK_URL;
+            if (webhookUrl) {
+                try {
+                    const response = await axios.post(webhookUrl, payload);
+                    zapStatus = 'SUCCESS';
+                    responseBody = JSON.stringify(response.data);
+                } catch (err: any) {
+                    zapStatus = 'FAILED';
+                    responseBody = err?.message || 'Webhook POST failed';
+                    console.error('[LINKEDIN] Zapier webhook failed:', err?.message);
+                }
+            } else {
+                console.log('[LINKEDIN-MOCK] ZAPIER_WEBHOOK_URL not set. Payload:', JSON.stringify(payload, null, 2));
+            }
         }
     } else {
         console.log('[LINKEDIN-MOCK] Disabled. Payload:', JSON.stringify(payload, null, 2));

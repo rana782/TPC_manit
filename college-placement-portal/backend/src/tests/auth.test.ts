@@ -10,6 +10,7 @@ describe('Auth Endpoints', () => {
         name: 'Test Student',
         email: 'test_auth@example.com',
         password: 'Password@123',
+        confirmPassword: 'Password@123',
         role: 'STUDENT'
     };
 

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 
 const API_BASE = 'http://localhost:5001/api';
 const STUDENT_EMAIL = 'ui_student@example.com';
-const PASSWORD = 'Pass@123';
+const PASSWORD = 'Password@123';
 const ROOT = 'verification_screenshots/resume_analysis_fix';
 
 test.beforeAll(() => {

@@ -9,10 +9,25 @@ const prisma = new PrismaClient();
 export const publishAnnouncement = async (req: AuthRequest, res: Response) => {
     try {
         const { job_id } = req.params;
-        const coordinatorId = req.user?.id;
-        if (!coordinatorId) return res.status(401).json({ success: false, message: 'Unauthorized' });
+        const actorUserId = req.user?.id;
+        const actorRole = req.user?.role;
+        if (!actorUserId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-        const result = await publishLinkedInAnnouncement(job_id, coordinatorId);
+        // SPOC can only publish for jobs posted by themselves; coordinator can publish any job.
+        if (actorRole === 'SPOC') {
+            const job = await prisma.job.findUnique({
+                where: { id: job_id },
+                select: { postedById: true }
+            });
+            if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+            if (job.postedById !== actorUserId) {
+                return res.status(403).json({ success: false, message: 'Forbidden. You can publish only your posted jobs.' });
+            }
+        }
+        const postTemplate =
+            typeof req.body?.post_template === 'string' ? req.body.post_template : undefined;
+
+        const result = await publishLinkedInAnnouncement(job_id, actorUserId, postTemplate);
 
         return res.status(201).json({
             success: true,
@@ -20,7 +35,10 @@ export const publishAnnouncement = async (req: AuthRequest, res: Response) => {
                 ? 'Announcement published to LinkedIn via Zapier.'
                 : result.log.zapStatus === 'MOCKED'
                     ? 'Announcement logged (Zapier disabled/mocked).'
-                    : 'Announcement attempted but Zapier returned an error.',
+                    : typeof result.log?.responseBody === 'string' &&
+                        result.log.responseBody.toLowerCase().includes('duplicate content prevented')
+                        ? result.log.responseBody
+                        : 'Announcement attempted but Zapier returned an error.',
             log: result.log
         });
     } catch (error: any) {

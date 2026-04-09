@@ -60,6 +60,13 @@ interface NotificationLog {
     job?: { companyName: string; role: string };
 }
 
+interface NotificationTemplate {
+    id: string | null;
+    type: string;
+    templateText: string;
+    source: 'DB' | 'DEFAULT';
+}
+
 interface LinkedInLog {
     id: string;
     jobId: string | null;
@@ -120,6 +127,8 @@ export default function AdminDashboard() {
     const [approvedSpocs, setApprovedSpocs] = useState<Spoc[]>([]);
     const [logs, setLogs] = useState<NotificationLog[]>([]);
     const [whatsappEnabled, setWhatsappEnabled] = useState(false);
+    const [notificationTemplates, setNotificationTemplates] = useState<NotificationTemplate[]>([]);
+    const [savingTemplateType, setSavingTemplateType] = useState<string | null>(null);
     const [linkedInLogs, setLinkedInLogs] = useState<LinkedInLog[]>([]);
     const [linkedInEnabled, setLinkedInEnabled] = useState(false);
     const [branchStats, setBranchStats] = useState<AnalyticsBranchStats[]>([]);
@@ -155,12 +164,14 @@ export default function AdminDashboard() {
 
     const fetchNotifications = async () => {
         try {
-            const [logsRes, settingsRes] = await Promise.all([
-                axios.get(`${API()}/api/admin/logs`, { headers }),
-                axios.get(`${API()}/api/admin/settings`, { headers })
+            const [logsRes, settingsRes, templatesRes] = await Promise.all([
+                axios.get(`${API()}/api/notifications/admin/logs`, { headers }),
+                axios.get(`${API()}/api/notifications/admin/settings`, { headers }),
+                axios.get(`${API()}/api/notifications/admin/templates`, { headers })
             ]);
             if (logsRes.data.success) setLogs(logsRes.data.logs);
             if (settingsRes.data.success) setWhatsappEnabled(settingsRes.data.setting?.value === 'true');
+            if (templatesRes.data.success) setNotificationTemplates(templatesRes.data.templates || []);
         } catch (e) { console.error("Failed to fetch notification data", e); }
     };
 
@@ -237,6 +248,22 @@ export default function AdminDashboard() {
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to approve SPOC'); }
     };
 
+    const handleRejectPendingSpoc = async (id: string, email: string) => {
+        const ok = window.confirm(
+            `Reject pending SPOC request for ${email}?\n\nThis permanently deletes the account.`
+        );
+        if (!ok) return;
+        try {
+            await axios.post(`${API()}/api/admin/spocs/${id}/reject`, {}, { headers });
+            setActionMsg('Pending SPOC request rejected and account deleted.');
+            fetchSpocs();
+            fetchUsers(roleFilter);
+            fetchStats();
+        } catch (e: any) {
+            setActionMsg(e.response?.data?.message || 'Failed to reject SPOC request');
+        }
+    };
+
     const handleTogglePermission = async (id: string, perm: string, currentVal: boolean) => {
         try {
             await axios.patch(`${API()}/api/admin/spocs/${id}/permissions`, { [perm]: !currentVal }, { headers });
@@ -245,14 +272,58 @@ export default function AdminDashboard() {
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to update permission'); }
     };
 
+    const handleRevokeSpoc = async (id: string, email: string) => {
+        const ok = window.confirm(
+            `Revoke ${email}?\n\nThis permanently deletes the SPOC account and related SPOC-owned data from the database.`
+        );
+        if (!ok) return;
+        try {
+            await axios.post(`${API()}/api/admin/spocs/${id}/revoke`, {}, { headers });
+            setActionMsg('SPOC revoked and deleted successfully.');
+            fetchSpocs();
+            fetchUsers(roleFilter);
+            fetchStats();
+        } catch (e: any) {
+            setActionMsg(e.response?.data?.message || 'Failed to revoke SPOC');
+        }
+    };
+
     const handleRoleFilter = (role: string) => { setRoleFilter(role); fetchUsers(role); };
 
     const toggleWhatsappSettings = async (enabled: boolean) => {
         try {
-            await axios.patch(`${API()}/api/admin/settings`, { whatsappEnabled: enabled }, { headers });
+            await axios.patch(`${API()}/api/notifications/admin/settings`, { whatsappEnabled: enabled }, { headers });
             setWhatsappEnabled(enabled);
             setActionMsg(`WhatsApp notifications ${enabled ? 'Enabled' : 'Disabled'}.`);
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to update settings'); }
+    };
+
+    const updateTemplateDraft = (type: string, templateText: string) => {
+        setNotificationTemplates((prev) =>
+            prev.map((template) => (template.type === type ? { ...template, templateText } : template))
+        );
+    };
+
+    const saveNotificationTemplate = async (type: string) => {
+        const template = notificationTemplates.find((t) => t.type === type);
+        if (!template || !template.templateText.trim()) {
+            setActionMsg('Template text cannot be empty.');
+            return;
+        }
+        try {
+            setSavingTemplateType(type);
+            await axios.put(
+                `${API()}/api/notifications/admin/templates/${encodeURIComponent(type)}`,
+                { templateText: template.templateText },
+                { headers }
+            );
+            setActionMsg(`Template ${type} saved.`);
+            await fetchNotifications();
+        } catch (e: any) {
+            setActionMsg(e.response?.data?.message || `Failed to save template ${type}`);
+        } finally {
+            setSavingTemplateType(null);
+        }
     };
 
     const toggleLinkedInSettings = async (enabled: boolean) => {
@@ -265,8 +336,16 @@ export default function AdminDashboard() {
 
     const handlePublishLinkedIn = async (jobId: string) => {
         if (!window.confirm("Trigger LinkedIn Post for this job?")) return;
+        const customTemplate = window.prompt(
+            'Edit caption template (leave empty to use backend default template):',
+            '🎉 Congratulations from TPC!\\n'
+        );
         try {
-            const res = await axios.post(`${API()}/api/announcements/job/${jobId}/publish`, {}, { headers });
+            const body: any = {};
+            if (typeof customTemplate === 'string' && customTemplate.trim()) {
+                body.post_template = customTemplate.trim();
+            }
+            const res = await axios.post(`${API()}/api/announcements/job/${jobId}/publish`, body, { headers });
             setActionMsg(res.data.message);
             fetchLinkedInData();
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to trigger publish'); }
@@ -532,10 +611,16 @@ export default function AdminDashboard() {
                                             <p className="text-xs text-gray-500">Registered {new Date(spoc.createdAt).toLocaleDateString('en-IN')}</p>
                                         </div>
                                     </div>
-                                    <button onClick={() => handleApproveSpoc(spoc.id)}
-                                        className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition-all transform active:scale-95">
-                                        <CheckCircle2 className="w-3.5 h-3.5" /> Approve
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => handleApproveSpoc(spoc.id)}
+                                            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-bold shadow-sm transition-all transform active:scale-95">
+                                            <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                                        </button>
+                                        <button onClick={() => handleRejectPendingSpoc(spoc.id, spoc.email)}
+                                            className="inline-flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-xs font-bold transition-all">
+                                            <XCircle className="w-3.5 h-3.5" /> Reject
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -580,6 +665,13 @@ export default function AdminDashboard() {
                                                 </button>
                                             );
                                         })}
+                                        <button
+                                            onClick={() => handleRevokeSpoc(spoc.id, spoc.email)}
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
+                                        >
+                                            <UserX className="w-3 h-3" />
+                                            Revoke & Delete
+                                        </button>
                                     </div>
                                 </div>
                             ))}
@@ -610,6 +702,52 @@ export default function AdminDashboard() {
                                 className={clsx('p-1 rounded-full transition-colors', whatsappEnabled ? 'text-emerald-600' : 'text-gray-400')}>
                                 {whatsappEnabled ? <ToggleRight className="w-10 h-10" /> : <ToggleLeft className="w-10 h-10" />}
                             </button>
+                        </div>
+                    </div>
+
+                    {/* WhatsApp Templates */}
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6" data-testid="notification-templates">
+                        <div className="mb-4">
+                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">WhatsApp Message Templates</h3>
+                            <p className="text-xs text-gray-500 mt-1">Edit placeholders like <code>{'{student_name}'}</code>, <code>{'{company_name}'}</code>, <code>{'{role}'}</code>, <code>{'{status}'}</code>, <code>{'{date}'}</code>.</p>
+                        </div>
+                        <div className="space-y-4">
+                            {notificationTemplates.length === 0 ? (
+                                <p className="text-sm text-gray-400 font-bold">No templates available.</p>
+                            ) : (
+                                notificationTemplates.map((template) => (
+                                    <div key={template.type} className="border border-gray-100 rounded-xl p-4 bg-gray-50/50">
+                                        <div className="flex items-center justify-between gap-3 mb-2">
+                                            <p className="text-sm font-bold text-gray-900">{template.type}</p>
+                                            <span className={clsx('text-[10px] px-2 py-0.5 rounded-full border font-bold',
+                                                template.source === 'DB' ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-gray-600 bg-gray-100 border-gray-200')}>
+                                                {template.source}
+                                            </span>
+                                        </div>
+                                        <textarea
+                                            value={template.templateText}
+                                            onChange={(e) => updateTemplateDraft(template.type, e.target.value)}
+                                            rows={3}
+                                            className="w-full rounded-lg border border-gray-200 bg-white text-sm px-3 py-2.5 focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 focus:outline-none"
+                                        />
+                                        <div className="flex justify-end mt-3">
+                                            <button
+                                                onClick={() => saveNotificationTemplate(template.type)}
+                                                disabled={savingTemplateType === template.type}
+                                                className={clsx(
+                                                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all',
+                                                    savingTemplateType === template.type
+                                                        ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                                        : 'bg-primary-50 text-primary-700 border-primary-200 hover:bg-primary-100'
+                                                )}
+                                            >
+                                                <Save className="w-3.5 h-3.5" />
+                                                {savingTemplateType === template.type ? 'Saving...' : 'Save Template'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
 

@@ -25,6 +25,22 @@ export default function AppLayout() {
         return <Navigate to="/login" replace />;
     }
 
+    const isSpocApprovalPending =
+        user.role === 'SPOC' &&
+        user.isVerified === true &&
+        !user.verifiedAt &&
+        !user.permJobCreate &&
+        !user.permLockProfile &&
+        !user.permExportCsv;
+
+    if (isSpocApprovalPending) {
+        return (
+            <div className="min-h-screen bg-white flex items-center justify-center">
+                <p className="text-xl font-semibold text-gray-700">Approval pending from the coordinator.</p>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-surface-bg flex">
             {/* Sidebar */}
