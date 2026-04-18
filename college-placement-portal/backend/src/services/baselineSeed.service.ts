@@ -521,7 +521,11 @@ export type RunBaselineOptions = {
 export async function ensureSupabaseBaselineSeed(prisma: PrismaClient, logger?: BaselineSeedLogger): Promise<void> {
     const log = logger ?? defaultLogger();
     const force = process.env.FORCE_BASELINE_SEED === 'true';
-    const disabled = process.env.AUTO_BASELINE_SEED === 'false';
+    const autoSeedFlag = String(process.env.AUTO_BASELINE_SEED || '').toLowerCase();
+    const isProduction = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const shouldAutoSeed =
+        autoSeedFlag === 'true' || (!isProduction && autoSeedFlag !== 'false');
+    const disabled = !shouldAutoSeed;
 
     if (disabled) {
         log.info('[baseline] AUTO_BASELINE_SEED=false — skipped');

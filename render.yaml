@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: tpc-portal-api
+    runtime: node
+    rootDir: college-placement-portal/backend
+    plan: free
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: AUTO_BASELINE_SEED
+        value: "false"
+      - key: SKIP_AUTO_COMPANY_IMPORT
+        value: "true"
+      - key: NOTIFICATIONS_ENABLED
+        value: "false"
+      - key: ZAPIER_ENABLED
+        value: "false"
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: PORT_UI_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: BREVO_SMTP_HOST
+        sync: false
+      - key: BREVO_SMTP_PORT
+        sync: false
+      - key: BREVO_SMTP_SECURE
+        sync: false
+      - key: BREVO_SMTP_USER
+        sync: false
+      - key: BREVO_SMTP_PASS
+        sync: false
+      - key: BREVO_SMTP_FROM
+        sync: false
+      - key: ATS_LLM_API_KEY
+        sync: false
+      - key: ATS_LLM_BASE_URL
+        sync: false
+      - key: ATS_LLM_MODEL
+        sync: false
+      - key: ATS_LLM_MODEL_FALLBACKS
+        sync: false
+      - key: NANONETS_API_KEY
+        sync: false
+      - key: NANONETS_EXTRACT_URL
+        sync: false

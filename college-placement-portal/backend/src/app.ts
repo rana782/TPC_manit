@@ -8,8 +8,24 @@ import path from 'path';
 
 const app: Application = express();
 
+const allowedOrigins = String(process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
 app.use(helmet());
-app.use(cors());
+app.use(
+    cors({
+        origin: (origin, callback) => {
+            if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+                callback(null, true);
+                return;
+            }
+            callback(new Error('Not allowed by CORS'));
+        },
+        credentials: true,
+    })
+);
 app.use(express.json());
 import authRoutes from './routes/auth.routes';
 import studentRoutes from './routes/student.routes';
