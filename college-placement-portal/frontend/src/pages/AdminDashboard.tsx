@@ -9,7 +9,7 @@ import {
     Briefcase, FileText, Lock, Unlock,
     CheckCircle2, XCircle, Search, ArrowLeft,
     ToggleLeft, ToggleRight, RefreshCw, UserCheck, UserX,
-    Shield, Save, Clock, Settings2, UserCircle
+    Shield, Save, Clock, Settings2, UserCircle, Trash2
 } from 'lucide-react';
 
 function formatEmailLocal(email: string) {
@@ -192,6 +192,31 @@ export default function AdminDashboard() {
             setActionMsg('User enabled.');
             fetchUsers(roleFilter);
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed'); }
+    };
+
+    const handleDeleteUser = async (target: User) => {
+        if (target.id === user?.id) {
+            setActionMsg('You cannot delete your own coordinator account.');
+            return;
+        }
+        const warn = [
+            `Delete user account permanently?`,
+            '',
+            `Email: ${target.email}`,
+            `Role: ${target.role}`,
+            '',
+            'This action deletes the account and related data.'
+        ].join('\n');
+        const ok = window.confirm(warn);
+        if (!ok) return;
+        try {
+            await axios.delete(`${getViteApiBase()}/admin/users/${target.id}`, { headers });
+            setActionMsg(`Deleted ${target.email}.`);
+            await fetchUsers(roleFilter);
+            if (target.role === 'SPOC') await fetchSpocs();
+        } catch (e: any) {
+            setActionMsg(e.response?.data?.message || 'Failed to delete user');
+        }
     };
 
     const handleUnlock = async (userId: string) => {
@@ -468,16 +493,18 @@ export default function AdminDashboard() {
                     </div>
 
                     <main className="p-4 sm:p-6 lg:p-8 flex-1 lg:bg-[linear-gradient(180deg,rgba(248,250,252,0.5)_0%,transparent_28%)]">
-                        <div className="hidden lg:flex items-start justify-between gap-6 mb-8">
-                            <div>
+                        <div className="hidden lg:flex items-center justify-between gap-6 mb-8">
+                            <div className="min-w-0 pr-4">
                                 <p className="text-xs font-medium text-slate-500 mb-1">You are viewing</p>
                                 <h2 className="text-2xl font-display font-semibold tracking-tight text-slate-900">
                                     {TABS.find((t) => t.key === activeTab)?.label ?? 'Admin'}
                                 </h2>
                             </div>
-                            <div className="flex items-start gap-2.5 text-xs text-slate-500 max-w-xs text-right leading-relaxed rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 shadow-sm">
-                                <Settings2 className="w-4 h-4 shrink-0 text-slate-400 mt-0.5" aria-hidden />
-                                <span>Privileged session — sensitive actions are recorded for audit.</span>
+                            <div className="flex items-center gap-3 text-xs text-slate-600 max-w-md rounded-xl border border-slate-200/90 bg-white px-4 py-3 shadow-sm shrink-0">
+                                <Settings2 className="w-4 h-4 shrink-0 text-slate-400" aria-hidden />
+                                <span className="text-left leading-relaxed">
+                                    Privileged session — sensitive actions are recorded for audit.
+                                </span>
                             </div>
                         </div>
 
@@ -505,21 +532,38 @@ export default function AdminDashboard() {
                         className="rounded-2xl border border-slate-200/90 bg-white shadow-sm shadow-slate-900/[0.03] overflow-hidden"
                         data-testid="users-table"
                     >
-                        <div className="flex flex-col gap-4 border-b border-slate-100 bg-slate-50/50 px-4 py-4 sm:px-5 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
+                        <div className="flex flex-col gap-5 border-b border-slate-100 bg-slate-50/50 px-4 py-5 sm:px-6">
+                            <div className="space-y-2 min-w-0">
                                 <h3 className="text-base font-semibold text-slate-900 tracking-tight">Account directory</h3>
-                                <p className="text-xs text-slate-500 mt-0.5">
-                                    <span className="font-medium text-slate-600 tabular-nums">{filteredUsers.length}</span>
-                                    {userSearch ? ' matching' : ' shown'}
-                                    {roleFilter ? ` · ${roleFilter}` : ''}
-                                    {total !== filteredUsers.length && !userSearch ? (
-                                        <span className="text-slate-400"> · {total} total</span>
+                                <div className="flex flex-wrap items-center gap-2" aria-live="polite">
+                                    <span className="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 tabular-nums shadow-sm">
+                                        {userSearch ? (
+                                            <>
+                                                <span className="text-slate-500 font-medium mr-1">Match</span>
+                                                {filteredUsers.length}
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span className="text-slate-500 font-medium mr-1">Shown</span>
+                                                {filteredUsers.length}
+                                            </>
+                                        )}
+                                    </span>
+                                    {roleFilter ? (
+                                        <span className="inline-flex items-center rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-900 uppercase tracking-wide">
+                                            {roleFilter}
+                                        </span>
                                     ) : null}
-                                </p>
+                                    {total !== filteredUsers.length && !userSearch ? (
+                                        <span className="inline-flex items-center rounded-md border border-slate-200/90 bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-500 tabular-nums">
+                                            {total} total in directory
+                                        </span>
+                                    ) : null}
+                                </div>
                             </div>
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 w-full sm:w-auto sm:justify-end">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
                                 <div
-                                    className="inline-flex rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-sm"
+                                    className="inline-flex flex-wrap rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-sm w-fit max-w-full"
                                     role="group"
                                     aria-label="Filter by role"
                                 >
@@ -529,7 +573,7 @@ export default function AdminDashboard() {
                                             type="button"
                                             onClick={() => handleRoleFilter(role)}
                                             className={clsx(
-                                                'px-3 py-2 rounded-md text-xs font-semibold transition-all',
+                                                'px-3 py-2 rounded-md text-xs font-semibold transition-all whitespace-nowrap',
                                                 roleFilter === role
                                                     ? 'bg-slate-900 text-white shadow-sm'
                                                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -539,7 +583,7 @@ export default function AdminDashboard() {
                                         </button>
                                     ))}
                                 </div>
-                                <div className="relative w-full sm:w-64">
+                                <div className="relative w-full lg:w-80 lg:max-w-md lg:shrink-0">
                                     <Search
                                         className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
                                         aria-hidden
@@ -562,7 +606,9 @@ export default function AdminDashboard() {
                                         <th className="px-4 sm:px-5 py-3 text-xs font-semibold text-slate-500 w-[38%]">User</th>
                                         <th className="px-4 sm:px-5 py-3 text-xs font-semibold text-slate-500 whitespace-nowrap">Role</th>
                                         <th className="px-4 sm:px-5 py-3 text-xs font-semibold text-slate-500 whitespace-nowrap">Status</th>
-                                        <th className="px-4 sm:px-5 py-3 text-xs font-semibold text-slate-500 min-w-[9rem]">Profile lock</th>
+                                        <th className="px-4 sm:px-5 py-3 text-xs font-semibold text-slate-500 min-w-[11rem] w-[14%]">
+                                            Profile lock
+                                        </th>
                                         <th className="px-4 sm:px-5 py-3 text-right text-xs font-semibold text-slate-500 whitespace-nowrap w-px">
                                             Actions
                                         </th>
@@ -642,26 +688,28 @@ export default function AdminDashboard() {
                                                 <td className="px-4 sm:px-5 py-3.5 align-top text-sm">
                                                     {u.role === 'STUDENT' ? (
                                                         u.student?.isLocked ? (
-                                                            <div className="space-y-1.5">
-                                                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700">
+                                                            <div className="max-w-[13rem] space-y-2 rounded-lg border border-rose-100 bg-rose-50/50 p-2.5">
+                                                                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-800">
                                                                     <Lock className="w-3.5 h-3.5 shrink-0" aria-hidden />
                                                                     Locked
                                                                 </span>
-                                                                {u.student.placementType && (
-                                                                    <p className="text-xs text-slate-500">{u.student.placementType}</p>
-                                                                )}
+                                                                {u.student.placementType ? (
+                                                                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-600 bg-white/90 border border-slate-200/80 rounded px-2 py-1 leading-snug break-words">
+                                                                        {u.student.placementType.replace(/_/g, ' ')}
+                                                                    </span>
+                                                                ) : null}
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => handleUnlock(u.id)}
-                                                                    className="inline-flex items-center gap-1 text-xs font-semibold text-amber-900 bg-amber-50 border border-amber-200/90 px-2 py-1 rounded-md hover:bg-amber-100/90 transition-colors"
+                                                                    className="inline-flex w-full items-center justify-center gap-1 text-xs font-semibold text-amber-950 bg-amber-50 border border-amber-200/90 px-2 py-1.5 rounded-md hover:bg-amber-100/90 transition-colors"
                                                                 >
-                                                                    <Unlock className="w-3 h-3" aria-hidden />
+                                                                    <Unlock className="w-3 h-3 shrink-0" aria-hidden />
                                                                     Unlock
                                                                 </button>
                                                             </div>
                                                         ) : (
-                                                            <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-600">
-                                                                <Unlock className="w-3.5 h-3.5 text-slate-400" aria-hidden />
+                                                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                                                                <Unlock className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden />
                                                                 Unlocked
                                                             </span>
                                                         )
@@ -670,25 +718,42 @@ export default function AdminDashboard() {
                                                     )}
                                                 </td>
                                                 <td className="px-4 sm:px-5 py-3.5 text-right align-top whitespace-nowrap">
-                                                    {u.isDisabled ? (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleEnable(u.id)}
-                                                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200/90 px-3 py-1.5 rounded-lg hover:bg-emerald-100/80 transition-colors"
-                                                        >
-                                                            <UserCheck className="w-3.5 h-3.5" aria-hidden />
-                                                            Enable
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleDisable(u.id)}
-                                                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-800 bg-rose-50 border border-rose-200/90 px-3 py-1.5 rounded-lg hover:bg-rose-100/80 transition-colors"
-                                                        >
-                                                            <UserX className="w-3.5 h-3.5" aria-hidden />
-                                                            Disable
-                                                        </button>
-                                                    )}
+                                                    <div className="inline-flex flex-wrap justify-end items-center gap-2">
+                                                        {u.isDisabled ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleEnable(u.id)}
+                                                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200/90 px-3 py-1.5 rounded-lg hover:bg-emerald-100/80 transition-colors"
+                                                            >
+                                                                <UserCheck className="w-3.5 h-3.5" aria-hidden />
+                                                                Enable
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDisable(u.id)}
+                                                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-800 bg-rose-50 border border-rose-200/90 px-3 py-1.5 rounded-lg hover:bg-rose-100/80 transition-colors"
+                                                            >
+                                                                <UserX className="w-3.5 h-3.5" aria-hidden />
+                                                                Disable
+                                                            </button>
+                                                        )}
+
+                                                        {u.id === user?.id ? (
+                                                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                                                Current session
+                                                            </span>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDeleteUser(u)}
+                                                                className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-900 bg-white border border-rose-200 px-3 py-1.5 rounded-lg hover:bg-rose-50 transition-colors"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" aria-hidden />
+                                                                Delete
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         );
@@ -729,26 +794,51 @@ export default function AdminDashboard() {
                                     <CheckCircle2 className="w-8 h-8 text-gray-300 mx-auto mb-2" />
                                     <p className="text-sm text-gray-400 font-bold">No pending SPOC accounts.</p>
                                 </div>
-                            ) : pendingSpocs.map(spoc => (
-                                <div key={spoc.id} className="flex items-center justify-between p-4 bg-amber-50/50 border border-amber-100 rounded-xl">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-amber-100 border border-amber-200 flex items-center justify-center">
-                                            <ShieldCheck className="w-5 h-5 text-amber-600" />
+                            ) : pendingSpocs.map((spoc) => (
+                                <div
+                                    key={spoc.id}
+                                    className="rounded-xl border border-amber-200/90 bg-gradient-to-br from-amber-50/95 via-white to-white p-4 shadow-sm ring-1 ring-amber-100/60"
+                                >
+                                    <div className="space-y-4">
+                                        <div className="flex min-w-0 flex-1 gap-3">
+                                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-200/80 bg-amber-100">
+                                                <ShieldCheck className="h-5 w-5 text-amber-700" aria-hidden />
+                                            </div>
+                                            <div className="min-w-0 flex-1 space-y-1 pt-0.5">
+                                                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-800/80">
+                                                    Pending request
+                                                </p>
+                                                <p className="text-sm font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere]">
+                                                    {spoc.email}
+                                                </p>
+                                                <p className="text-xs font-medium text-slate-600">
+                                                    Registered{' '}
+                                                    {new Date(spoc.createdAt).toLocaleDateString('en-IN', {
+                                                        day: 'numeric',
+                                                        month: 'short',
+                                                        year: 'numeric',
+                                                    })}
+                                                </p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="text-sm font-bold text-gray-900">{spoc.email}</p>
-                                            <p className="text-xs text-gray-500">Registered {new Date(spoc.createdAt).toLocaleDateString('en-IN')}</p>
+                                        <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleApproveSpoc(spoc.id)}
+                                                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-emerald-700 sm:flex-none sm:min-w-[8rem]"
+                                            >
+                                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                                Approve
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleRejectPendingSpoc(spoc.id, spoc.email)}
+                                                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-800 transition-colors hover:bg-rose-100/90 sm:flex-none sm:min-w-[8rem]"
+                                            >
+                                                <XCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                                Reject
+                                            </button>
                                         </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button onClick={() => handleApproveSpoc(spoc.id)}
-                                            className="inline-flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-bold shadow-sm transition-all transform active:scale-95">
-                                            <CheckCircle2 className="w-3.5 h-3.5" /> Approve
-                                        </button>
-                                        <button onClick={() => handleRejectPendingSpoc(spoc.id, spoc.email)}
-                                            className="inline-flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-xs font-bold transition-all">
-                                            <XCircle className="w-3.5 h-3.5" /> Reject
-                                        </button>
                                     </div>
                                 </div>
                             ))}
@@ -771,9 +861,11 @@ export default function AdminDashboard() {
                                         <div className="w-9 h-9 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center">
                                             <ShieldCheck className="w-4 h-4 text-emerald-600" />
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-bold text-gray-900 truncate">{spoc.email}</p>
-                                            <p className="text-xs text-gray-500">Verified by {spoc.verifiedBy?.email || 'Admin'}</p>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-sm font-semibold leading-snug text-slate-900 [overflow-wrap:anywhere]">{spoc.email}</p>
+                                            <p className="mt-0.5 break-words text-xs text-slate-600">
+                                                Verified by <span className="font-medium">{spoc.verifiedBy?.email || 'Admin'}</span>
+                                            </p>
                                         </div>
                                     </div>
                                     <div className="flex flex-wrap gap-2">

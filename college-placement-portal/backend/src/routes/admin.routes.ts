@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getStats, listUsers, disableUser, enableUser } from '../controllers/admin.controller';
+import { getStats, listUsers, disableUser, enableUser, deleteUser } from '../controllers/admin.controller';
 import { verifyToken, requireRole } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -14,6 +14,7 @@ router.get('/stats', getStats);
 router.get('/users', listUsers);
 router.patch('/users/:id/disable', disableUser);
 router.patch('/users/:id/enable', enableUser);
+router.delete('/users/:id', deleteUser);
 
 // SPOC Management Routes
 router.get('/spocs/pending', getPendingSpocs);

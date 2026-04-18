@@ -125,6 +125,45 @@ export const enableUser = async (req: AuthRequest, res: Response) => {
     }
 };
 
+export const deleteUser = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id } = req.params;
+        const coordinatorId = req.user?.id;
+
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'User id is required' });
+        }
+        if (id === coordinatorId) {
+            return res.status(400).json({ success: false, message: 'You cannot delete your own coordinator account.' });
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id },
+            select: { id: true, email: true, role: true }
+        });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        await prisma.user.delete({ where: { id } });
+
+        return res.json({
+            success: true,
+            message: `User ${user.email} deleted permanently.`,
+            user
+        });
+    } catch (error: any) {
+        // Prisma FK / relation constraint errors.
+        if (error?.code === 'P2003') {
+            return res.status(409).json({
+                success: false,
+                message: 'User cannot be deleted because related records still require this account.'
+            });
+        }
+        return res.status(500).json({ success: false, message: 'Failed to delete user' });
+    }
+};
+
 export const getPendingSpocs = async (req: AuthRequest, res: Response) => {
     try {
         const spocs = await prisma.user.findMany({
