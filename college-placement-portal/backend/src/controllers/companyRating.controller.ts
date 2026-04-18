@@ -1,9 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
-import { PrismaClient } from '@prisma/client';
 import { normalizeCompanyName } from '../utils/companyNormalizer';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 export const getCompanyRating = async (req: AuthRequest, res: Response) => {
   const rawName = typeof req.query.name === 'string' ? req.query.name : '';

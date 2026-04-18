@@ -8,6 +8,7 @@ export default {
     extend: {
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        display: ['Newsreader', 'Georgia', 'Cambria', 'Times New Roman', 'serif'],
       },
       colors: {
         primary: {

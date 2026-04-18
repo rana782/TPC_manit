@@ -3,11 +3,10 @@
 import { Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { z } from 'zod';
-
-const prisma = new PrismaClient();
+import { normalizeCompanyName } from '../utils/companyNormalizer';
+import prisma from '../lib/prisma';
 
 function unlinkUploadRelative(relPath: string | null | undefined) {
     if (!relPath || typeof relPath !== 'string' || !relPath.startsWith('/uploads/')) return;
@@ -18,6 +17,12 @@ function unlinkUploadRelative(relPath: string | null | undefined) {
     } catch {
         /* ignore missing file */
     }
+}
+
+function normalizeShortlistDocTitle(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const t = raw.replace(/\s+/g, ' ').trim().slice(0, 200);
+    return t.length > 0 ? t : null;
 }
 
 /** When stage dates change, sorted order may change — remap indices by stage id. */
@@ -213,28 +218,85 @@ export const createJob = async (req: AuthRequest, res: Response) => {
 export const listJobs = async (req: AuthRequest, res: Response) => {
     try {
         const role = req.user?.role;
+        const userId = req.user?.id;
         const todayStart = startOfToday();
 
         const where: any = {};
         if (role === 'STUDENT') {
             where.applicationDeadline = { gte: todayStart };
             where.status = 'PUBLISHED';
+        } else if (role === 'SPOC') {
+            // SPOCs can only manage/view their own postings.
+            where.postedById = userId;
         }
 
         const jobs = await prisma.job.findMany({
             where,
-            orderBy: { createdAt: 'desc' },
-            include: {
-                _count: {
-                    select: {
-                        applications: {
-                            where: {
-                                status: { notIn: ['WITHDRAWN', 'REJECTED'] }
-                            }
-                        }
-                    }
+            orderBy: { createdAt: 'desc' }
+        });
+        const jobIds = jobs.map((j) => j.id);
+        const applicationCounts = jobIds.length > 0
+            ? await prisma.jobApplication.groupBy({
+                by: ['jobId'],
+                where: {
+                    jobId: { in: jobIds },
+                    status: { notIn: ['WITHDRAWN', 'REJECTED'] }
+                },
+                _count: { _all: true }
+            })
+            : [];
+        const appCountByJobId = new Map(applicationCounts.map((row) => [row.jobId, row._count._all]));
+        const jobsWithCounts = jobs.map((job) => ({
+            ...job,
+            _count: { applications: appCountByJobId.get(job.id) ?? 0 }
+        }));
+        const uniqueCompanyNames = [...new Set(
+            jobsWithCounts
+                .map((j) => (typeof j.companyName === 'string' ? j.companyName.trim() : ''))
+                .filter((name) => name.length > 0)
+        )];
+        const normalizedKeys = [...new Set(uniqueCompanyNames.map((name) => normalizeCompanyName(name)).filter(Boolean))];
+        const companyRows = normalizedKeys.length > 0
+            ? await prisma.companyProfile.findMany({
+                where: { normalizedName: { in: normalizedKeys } },
+                select: {
+                    companyName: true,
+                    normalizedName: true,
+                    rating: true,
+                    reviewCount: true,
+                    logoUrl: true,
+                    highlyRatedFor: true,
+                    criticallyRatedFor: true
                 }
-            }
+            })
+            : [];
+        const profileByNormalized = new Map(companyRows.map((r) => [r.normalizedName, r]));
+        const profileByLowerName = new Map(companyRows.map((r) => [r.companyName.trim().toLowerCase(), r]));
+        const jobsWithCompanyProfile = jobsWithCounts.map((job) => {
+            const normalized = normalizeCompanyName(job.companyName || '');
+            const byNorm = normalized ? profileByNormalized.get(normalized) : null;
+            const byLower = profileByLowerName.get((job.companyName || '').trim().toLowerCase());
+            const profile = byNorm || byLower || null;
+            return {
+                ...job,
+                companyProfile: profile
+                    ? {
+                        found: true,
+                        rating: profile.rating ?? null,
+                        reviews: profile.reviewCount ?? null,
+                        logoUrl: profile.logoUrl ?? null,
+                        highlyRatedFor: profile.highlyRatedFor ?? [],
+                        criticallyRatedFor: profile.criticallyRatedFor ?? []
+                    }
+                    : {
+                        found: false,
+                        rating: null,
+                        reviews: null,
+                        logoUrl: null,
+                        highlyRatedFor: [],
+                        criticallyRatedFor: []
+                    }
+            };
         });
         if (role === 'STUDENT') {
             console.log('[listJobs][student]', {
@@ -243,7 +305,7 @@ export const listJobs = async (req: AuthRequest, res: Response) => {
                 jobsReturned: jobs.length
             });
         }
-        res.json({ success: true, jobs });
+        res.json({ success: true, jobs: jobsWithCompanyProfile });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Failed to fetch jobs' });
     }
@@ -296,6 +358,12 @@ export const getJob = async (req: AuthRequest, res: Response) => {
                 startOfDay(new Date(a.scheduledDate)).getTime() - startOfDay(new Date(b.scheduledDate)).getTime() ||
                 new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         );
+        const rawStageTitles = await prisma.$queryRaw<Array<{ id: string; shortlistDocTitle: string | null }>>`
+            SELECT id, "shortlistDocTitle"
+            FROM "JobStage"
+            WHERE "jobId" = ${id}
+        `;
+        const stageTitleById = new Map(rawStageTitles.map((r) => [r.id, r.shortlistDocTitle ?? null]));
 
         const timelineStages = stagesOrdered.map((s, i) => ({
             id: s.id,
@@ -304,6 +372,7 @@ export const getJob = async (req: AuthRequest, res: Response) => {
             scheduledDate: s.scheduledDate,
             status: s.status,
             shortlistDocPath: s.shortlistDocPath || null,
+            shortlistDocTitle: stageTitleById.get(s.id) ?? null,
             notes: s.notes ?? null,
             attachmentPath: s.attachmentPath ?? null
         }));
@@ -869,16 +938,59 @@ export const uploadStageShortlistDoc = async (req: AuthRequest, res: Response) =
         });
         if (!stage) return res.status(404).json({ success: false, message: 'Stage not found for this job' });
 
+        if (stage.shortlistDocPath) unlinkUploadRelative(stage.shortlistDocPath);
+
         const docPath = `/uploads/${file.filename}`;
+        const shortlistDocTitle = normalizeShortlistDocTitle(req.body?.shortlistDocTitle);
         const updatedStage = await prisma.jobStage.update({
             where: { id: stage.id },
             data: { shortlistDocPath: docPath }
         });
+        await prisma.$executeRaw`
+            UPDATE "JobStage"
+            SET "shortlistDocTitle" = ${shortlistDocTitle}
+            WHERE id = ${stage.id}
+        `;
 
-        return res.json({ success: true, stage: updatedStage, shortlistDocPath: docPath });
+        return res.json({ success: true, stage: updatedStage, shortlistDocPath: docPath, shortlistDocTitle });
     } catch (error) {
         console.error('[uploadStageShortlistDoc] error:', error);
         return res.status(500).json({ success: false, message: 'Failed to upload shortlist document' });
+    }
+};
+
+export const deleteStageShortlistDoc = async (req: AuthRequest, res: Response) => {
+    try {
+        const { id, stageId } = req.params;
+        const userId = req.user?.id;
+
+        const job = await prisma.job.findUnique({ where: { id } });
+        if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+        if (!canManageJobPlacement(req.user?.role, job.postedById, userId)) {
+            return res.status(403).json({ success: false, message: 'Forbidden' });
+        }
+
+        const stage = await prisma.jobStage.findFirst({
+            where: { id: stageId, jobId: id }
+        });
+        if (!stage) return res.status(404).json({ success: false, message: 'Stage not found for this job' });
+
+        if (stage.shortlistDocPath) unlinkUploadRelative(stage.shortlistDocPath);
+
+        const updatedStage = await prisma.jobStage.update({
+            where: { id: stage.id },
+            data: { shortlistDocPath: null }
+        });
+        await prisma.$executeRaw`
+            UPDATE "JobStage"
+            SET "shortlistDocTitle" = NULL
+            WHERE id = ${stage.id}
+        `;
+
+        return res.json({ success: true, stage: updatedStage });
+    } catch (error) {
+        console.error('[deleteStageShortlistDoc] error:', error);
+        return res.status(500).json({ success: false, message: 'Failed to remove shortlist document' });
     }
 };
 
@@ -1314,10 +1426,14 @@ export const declareResults = async (req: AuthRequest, res: Response) => {
         }
 
         const placementYear = new Date().getFullYear();
+        const finalStageIndex = Math.max(0, (job.stages?.length || 1) - 1);
         await prisma.$transaction(async (tx) => {
             await tx.jobApplication.updateMany({
                 where: { id: { in: selectedApplications.map((app) => app.id) } },
-                data: { status: 'PLACED' }
+                data: {
+                    status: 'PLACED',
+                    currentStageIndex: finalStageIndex,
+                }
             });
 
             await tx.student.updateMany({

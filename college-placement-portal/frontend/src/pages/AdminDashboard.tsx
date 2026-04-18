@@ -1,24 +1,44 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { getViteApiBase } from '../utils/apiBase';
+import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
 import {
-    LayoutDashboard, Users, ShieldCheck, MessageSquare, Linkedin, BarChart3,
-    GraduationCap, Briefcase, FileText, Lock, Unlock,
+    Users, ShieldCheck, Mail, Linkedin,
+    Briefcase, FileText, Lock, Unlock,
     CheckCircle2, XCircle, Search, ArrowLeft,
     ToggleLeft, ToggleRight, RefreshCw, UserCheck, UserX,
-    Shield, Award, TrendingUp, Sliders, Save, Clock
+    Shield, Save, Clock, Settings2, UserCircle
 } from 'lucide-react';
 
-interface Stats {
-    totalStudents: number;
-    totalJobs: number;
-    totalApplications: number;
-    placedStudents: number;
-    lockedProfiles: number;
-    applicationsByStatus: Record<string, number>;
+function formatEmailLocal(email: string) {
+    const local = email.split('@')[0] || email;
+    return local
+        .replace(/[._-]+/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+}
+
+function accountDisplayName(u: User) {
+    if (u.student?.firstName?.trim() || u.student?.lastName?.trim()) {
+        return `${u.student!.firstName ?? ''} ${u.student!.lastName ?? ''}`.trim();
+    }
+    return formatEmailLocal(u.email);
+}
+
+function initialsFromDisplayName(name: string) {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    if (parts.length === 1 && parts[0].length >= 2) return parts[0].slice(0, 2).toUpperCase();
+    return (name.slice(0, 2) || '—').toUpperCase();
+}
+
+function logUserDisplayName(user: { email: string; student?: { firstName: string; lastName: string } | null }) {
+    if (user.student?.firstName?.trim() || user.student?.lastName?.trim()) {
+        return `${user.student.firstName ?? ''} ${user.student.lastName ?? ''}`.trim();
+    }
+    return formatEmailLocal(user.email);
 }
 
 interface User {
@@ -60,13 +80,6 @@ interface NotificationLog {
     job?: { companyName: string; role: string };
 }
 
-interface NotificationTemplate {
-    id: string | null;
-    type: string;
-    templateText: string;
-    source: 'DB' | 'DEFAULT';
-}
-
 interface LinkedInLog {
     id: string;
     jobId: string | null;
@@ -80,128 +93,84 @@ interface LinkedInLog {
     job?: { companyName: string; role: string };
 }
 
-interface AnalyticsBranchStats {
-    branch: string;
-    placementCount: number;
-    avgCtc: string;
-}
-
-interface AnalyticsTrend {
-    period: string;
-    placements: number;
-}
-
-interface AtsConfig {
-    skillsMatch: number;
-    projects: number;
-    certifications: number;
-    tools: number;
-    experience: number;
-}
-
-const API = () => `${import.meta.env.VITE_API_URL}`;
-
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts';
-
-type TabKey = 'stats' | 'users' | 'spocs' | 'notifications' | 'linkedin' | 'analytics';
+type TabKey = 'users' | 'spocs' | 'email' | 'linkedin';
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
-    { key: 'stats', label: 'Dashboard', icon: LayoutDashboard },
     { key: 'users', label: 'Users', icon: Users },
     { key: 'spocs', label: 'SPOCs', icon: ShieldCheck },
-    { key: 'notifications', label: 'WhatsApp', icon: MessageSquare },
+    { key: 'email', label: 'Email Automation', icon: Mail },
     { key: 'linkedin', label: 'LinkedIn', icon: Linkedin },
-    { key: 'analytics', label: 'Analytics & ATS', icon: BarChart3 },
 ];
 
 export default function AdminDashboard() {
     const { token, user } = useAuth();
-    const navigate = useNavigate();
-    const [stats, setStats] = useState<Stats | null>(null);
     const [users, setUsers] = useState<User[]>([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<TabKey>('stats');
+    const [activeTab, setActiveTab] = useState<TabKey>('users');
     const [roleFilter, setRoleFilter] = useState('');
     const [pendingSpocs, setPendingSpocs] = useState<Spoc[]>([]);
     const [approvedSpocs, setApprovedSpocs] = useState<Spoc[]>([]);
-    const [logs, setLogs] = useState<NotificationLog[]>([]);
-    const [whatsappEnabled, setWhatsappEnabled] = useState(false);
-    const [notificationTemplates, setNotificationTemplates] = useState<NotificationTemplate[]>([]);
-    const [savingTemplateType, setSavingTemplateType] = useState<string | null>(null);
+    const [emailLogs, setEmailLogs] = useState<NotificationLog[]>([]);
+    const [emailEnabled, setEmailEnabled] = useState(false);
+    const [emailTemplate, setEmailTemplate] = useState('');
+    const [emailTemplateSource, setEmailTemplateSource] = useState<'DB' | 'DEFAULT'>('DEFAULT');
+    const [savingEmailTemplate, setSavingEmailTemplate] = useState(false);
     const [linkedInLogs, setLinkedInLogs] = useState<LinkedInLog[]>([]);
     const [linkedInEnabled, setLinkedInEnabled] = useState(false);
-    const [branchStats, setBranchStats] = useState<AnalyticsBranchStats[]>([]);
-    const [trendStats, setTrendStats] = useState<AnalyticsTrend[]>([]);
-    const [atsConfig, setAtsConfig] = useState<AtsConfig | null>(null);
     const [error, setError] = useState('');
     const [actionMsg, setActionMsg] = useState('');
     const [userSearch, setUserSearch] = useState('');
 
     const headers = { Authorization: `Bearer ${token}` };
 
-    const fetchStats = async () => {
-        const res = await axios.get(`${API()}/api/admin/stats`, { headers });
-        if (res.data.success) setStats(res.data.stats);
-    };
-
     const fetchUsers = async (role = '') => {
         const params = role ? `?role=${role}` : '';
-        const res = await axios.get(`${API()}/api/admin/users${params}`, { headers });
+        const res = await axios.get(`${getViteApiBase()}/admin/users${params}`, { headers });
         if (res.data.success) { setUsers(res.data.users); setTotal(res.data.total); }
     };
 
     const fetchSpocs = async () => {
         try {
             const [pendingRes, approvedRes] = await Promise.all([
-                axios.get(`${API()}/api/admin/spocs/pending`, { headers }),
-                axios.get(`${API()}/api/admin/spocs/approved`, { headers })
+                axios.get(`${getViteApiBase()}/admin/spocs/pending`, { headers }),
+                axios.get(`${getViteApiBase()}/admin/spocs/approved`, { headers })
             ]);
             if (pendingRes.data.success) setPendingSpocs(pendingRes.data.spocs);
             if (approvedRes.data.success) setApprovedSpocs(approvedRes.data.spocs);
         } catch (e) { console.error("Failed to fetch SPOCs", e); }
     };
 
-    const fetchNotifications = async () => {
+    const fetchEmailAutomation = async () => {
         try {
-            const [logsRes, settingsRes, templatesRes] = await Promise.all([
-                axios.get(`${API()}/api/notifications/admin/logs`, { headers }),
-                axios.get(`${API()}/api/notifications/admin/settings`, { headers }),
-                axios.get(`${API()}/api/notifications/admin/templates`, { headers })
+            const [logsRes, settingsRes, templateRes] = await Promise.all([
+                axios.get(`${getViteApiBase()}/notifications/admin/email/logs?channel=EMAIL`, { headers }),
+                axios.get(`${getViteApiBase()}/notifications/admin/email/settings`, { headers }),
+                axios.get(`${getViteApiBase()}/notifications/admin/email/template`, { headers })
             ]);
-            if (logsRes.data.success) setLogs(logsRes.data.logs);
-            if (settingsRes.data.success) setWhatsappEnabled(settingsRes.data.setting?.value === 'true');
-            if (templatesRes.data.success) setNotificationTemplates(templatesRes.data.templates || []);
-        } catch (e) { console.error("Failed to fetch notification data", e); }
+            if (logsRes.data.success) setEmailLogs((logsRes.data.logs || []).filter((l: NotificationLog) => l.channel === 'EMAIL'));
+            if (settingsRes.data.success) setEmailEnabled(settingsRes.data.setting?.value === 'true');
+            if (templateRes.data.success) {
+                setEmailTemplate(templateRes.data.template || '');
+                setEmailTemplateSource(templateRes.data.source === 'DB' ? 'DB' : 'DEFAULT');
+            }
+        } catch (e) { console.error("Failed to fetch email automation data", e); }
     };
 
     const fetchLinkedInData = async () => {
         try {
             const [logsRes, settingsRes] = await Promise.all([
-                axios.get(`${API()}/api/announcements/linkedin/logs`, { headers }),
-                axios.get(`${API()}/api/announcements/linkedin/settings`, { headers })
+                axios.get(`${getViteApiBase()}/announcements/linkedin/logs`, { headers }),
+                axios.get(`${getViteApiBase()}/announcements/linkedin/settings`, { headers })
             ]);
             if (logsRes.data.success) setLinkedInLogs(logsRes.data.logs);
             if (settingsRes.data.success) setLinkedInEnabled(settingsRes.data.setting?.value === 'true');
         } catch (e) { console.error("Failed to fetch LinkedIn data", e); }
     };
 
-    const fetchAnalyticsAndAts = async () => {
-        try {
-            const [branchRes, trendRes, atsRes] = await Promise.all([
-                axios.get(`${API()}/api/analytics/branch-comparison`, { headers }),
-                axios.get(`${API()}/api/analytics/placement-trends`, { headers }),
-                axios.get(`${API()}/api/ats/config`, { headers })
-            ]);
-            if (branchRes.data.success) setBranchStats(branchRes.data.data);
-            if (trendRes.data.success) setTrendStats(trendRes.data.data);
-            if (atsRes.data.success) setAtsConfig(atsRes.data.data);
-        } catch (e) { console.error("Failed to fetch analytics/ATS config", e); }
-    };
-
     useEffect(() => {
         if (token && user?.role === 'COORDINATOR') {
-            Promise.all([fetchStats(), fetchUsers(), fetchSpocs(), fetchNotifications(), fetchLinkedInData(), fetchAnalyticsAndAts()]).finally(() => setLoading(false));
+            Promise.all([fetchUsers(), fetchSpocs(), fetchEmailAutomation(), fetchLinkedInData()]).finally(() => setLoading(false));
         } else {
             setLoading(false);
             setError('Access Denied: Only Coordinators can access the Admin Panel.');
@@ -211,7 +180,7 @@ export default function AdminDashboard() {
     const handleDisable = async (id: string) => {
         if (!window.confirm('Disable this user?')) return;
         try {
-            await axios.patch(`${API()}/api/admin/users/${id}/disable`, {}, { headers });
+            await axios.patch(`${getViteApiBase()}/admin/users/${id}/disable`, {}, { headers });
             setActionMsg('User disabled.');
             fetchUsers(roleFilter);
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed'); }
@@ -219,7 +188,7 @@ export default function AdminDashboard() {
 
     const handleEnable = async (id: string) => {
         try {
-            await axios.patch(`${API()}/api/admin/users/${id}/enable`, {}, { headers });
+            await axios.patch(`${getViteApiBase()}/admin/users/${id}/enable`, {}, { headers });
             setActionMsg('User enabled.');
             fetchUsers(roleFilter);
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed'); }
@@ -229,22 +198,20 @@ export default function AdminDashboard() {
         const reason = window.prompt("Enter override reason for unlocking this student:", "Administrative Unlock");
         if (!reason) return;
         try {
-            await axios.post(`${API()}/api/admin/overrides`, {
+            await axios.post(`${getViteApiBase()}/admin/overrides`, {
                 actionType: 'UNLOCK_STUDENT', entity: 'Student', entityId: userId,
                 spocId: user?.id, reason
             }, { headers });
             setActionMsg('Profile unlocked via Override log.');
             fetchUsers(roleFilter);
-            fetchStats();
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to unlock'); }
     };
 
     const handleApproveSpoc = async (id: string) => {
         try {
-            await axios.patch(`${API()}/api/admin/spocs/${id}/approve`, {}, { headers });
+            await axios.patch(`${getViteApiBase()}/admin/spocs/${id}/approve`, {}, { headers });
             setActionMsg('SPOC approved successfully.');
             fetchSpocs();
-            fetchStats();
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to approve SPOC'); }
     };
 
@@ -254,11 +221,10 @@ export default function AdminDashboard() {
         );
         if (!ok) return;
         try {
-            await axios.post(`${API()}/api/admin/spocs/${id}/reject`, {}, { headers });
+            await axios.post(`${getViteApiBase()}/admin/spocs/${id}/reject`, {}, { headers });
             setActionMsg('Pending SPOC request rejected and account deleted.');
             fetchSpocs();
             fetchUsers(roleFilter);
-            fetchStats();
         } catch (e: any) {
             setActionMsg(e.response?.data?.message || 'Failed to reject SPOC request');
         }
@@ -266,7 +232,7 @@ export default function AdminDashboard() {
 
     const handleTogglePermission = async (id: string, perm: string, currentVal: boolean) => {
         try {
-            await axios.patch(`${API()}/api/admin/spocs/${id}/permissions`, { [perm]: !currentVal }, { headers });
+            await axios.patch(`${getViteApiBase()}/admin/spocs/${id}/permissions`, { [perm]: !currentVal }, { headers });
             setActionMsg(`Permission ${perm} updated.`);
             fetchSpocs();
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to update permission'); }
@@ -278,11 +244,10 @@ export default function AdminDashboard() {
         );
         if (!ok) return;
         try {
-            await axios.post(`${API()}/api/admin/spocs/${id}/revoke`, {}, { headers });
+            await axios.post(`${getViteApiBase()}/admin/spocs/${id}/revoke`, {}, { headers });
             setActionMsg('SPOC revoked and deleted successfully.');
             fetchSpocs();
             fetchUsers(roleFilter);
-            fetchStats();
         } catch (e: any) {
             setActionMsg(e.response?.data?.message || 'Failed to revoke SPOC');
         }
@@ -290,45 +255,38 @@ export default function AdminDashboard() {
 
     const handleRoleFilter = (role: string) => { setRoleFilter(role); fetchUsers(role); };
 
-    const toggleWhatsappSettings = async (enabled: boolean) => {
+    const toggleEmailSettings = async (enabled: boolean) => {
         try {
-            await axios.patch(`${API()}/api/notifications/admin/settings`, { whatsappEnabled: enabled }, { headers });
-            setWhatsappEnabled(enabled);
-            setActionMsg(`WhatsApp notifications ${enabled ? 'Enabled' : 'Disabled'}.`);
+            await axios.patch(`${getViteApiBase()}/notifications/admin/email/settings`, { emailEnabled: enabled }, { headers });
+            setEmailEnabled(enabled);
+            setActionMsg(`Email automation ${enabled ? 'enabled' : 'disabled'}.`);
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to update settings'); }
     };
 
-    const updateTemplateDraft = (type: string, templateText: string) => {
-        setNotificationTemplates((prev) =>
-            prev.map((template) => (template.type === type ? { ...template, templateText } : template))
-        );
-    };
-
-    const saveNotificationTemplate = async (type: string) => {
-        const template = notificationTemplates.find((t) => t.type === type);
-        if (!template || !template.templateText.trim()) {
+    const saveEmailTemplate = async () => {
+        if (!emailTemplate.trim()) {
             setActionMsg('Template text cannot be empty.');
             return;
         }
         try {
-            setSavingTemplateType(type);
+            setSavingEmailTemplate(true);
             await axios.put(
-                `${API()}/api/notifications/admin/templates/${encodeURIComponent(type)}`,
-                { templateText: template.templateText },
+                `${getViteApiBase()}/notifications/admin/email/template`,
+                { templateText: emailTemplate.trim() },
                 { headers }
             );
-            setActionMsg(`Template ${type} saved.`);
-            await fetchNotifications();
+            setActionMsg('Placement email template saved.');
+            await fetchEmailAutomation();
         } catch (e: any) {
-            setActionMsg(e.response?.data?.message || `Failed to save template ${type}`);
+            setActionMsg(e.response?.data?.message || 'Failed to save email template');
         } finally {
-            setSavingTemplateType(null);
+            setSavingEmailTemplate(false);
         }
     };
 
     const toggleLinkedInSettings = async (enabled: boolean) => {
         try {
-            await axios.patch(`${API()}/api/announcements/linkedin/settings`, { enabled }, { headers });
+            await axios.patch(`${getViteApiBase()}/announcements/linkedin/settings`, { enabled }, { headers });
             setLinkedInEnabled(enabled);
             setActionMsg(`LinkedIn Announcements ${enabled ? 'Enabled' : 'Disabled'}.`);
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to update settings'); }
@@ -345,7 +303,7 @@ export default function AdminDashboard() {
             if (typeof customTemplate === 'string' && customTemplate.trim()) {
                 body.post_template = customTemplate.trim();
             }
-            const res = await axios.post(`${API()}/api/announcements/job/${jobId}/publish`, body, { headers });
+            const res = await axios.post(`${getViteApiBase()}/announcements/job/${jobId}/publish`, body, { headers });
             setActionMsg(res.data.message);
             fetchLinkedInData();
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to trigger publish'); }
@@ -369,17 +327,25 @@ export default function AdminDashboard() {
 
     const roleBadge = (role: string) => {
         const map: Record<string, string> = {
-            STUDENT: 'bg-blue-50 text-blue-700 border-blue-200',
-            SPOC: 'bg-amber-50 text-amber-700 border-amber-200',
-            COORDINATOR: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            STUDENT: 'bg-slate-100 text-slate-800 border-slate-200/90',
+            SPOC: 'bg-violet-50 text-violet-800 border-violet-200/80',
+            COORDINATOR: 'bg-indigo-50 text-indigo-900 border-indigo-200/80',
         };
-        return map[role] || 'bg-gray-50 text-gray-600 border-gray-200';
+        return map[role] || 'bg-slate-50 text-slate-600 border-slate-200';
     };
 
-    const filteredUsers = users.filter(u => {
+    const roleAvatarRing = (role: string) => {
+        if (role === 'STUDENT') return 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/80';
+        if (role === 'SPOC') return 'bg-violet-50 text-violet-800 ring-1 ring-violet-200/70';
+        return 'bg-indigo-50 text-indigo-900 ring-1 ring-indigo-200/70';
+    };
+
+    const filteredUsers = users.filter((u) => {
         if (!userSearch) return true;
-        const name = u.student ? `${u.student.firstName} ${u.student.lastName}` : '';
-        return name.toLowerCase().includes(userSearch.toLowerCase()) || u.email.toLowerCase().includes(userSearch.toLowerCase());
+        const q = userSearch.toLowerCase();
+        const display = accountDisplayName(u).toLowerCase();
+        const legacyName = u.student ? `${u.student.firstName} ${u.student.lastName}`.toLowerCase() : '';
+        return display.includes(q) || legacyName.includes(q) || u.email.toLowerCase().includes(q) || u.role.toLowerCase().includes(q);
     });
 
     if (loading) return (
@@ -397,200 +363,363 @@ export default function AdminDashboard() {
     );
 
     return (
-        <div className="p-4 sm:p-6 lg:p-8 max-w-full" data-testid="admin-dashboard">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-                <div>
-                    <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Coordinator Panel</h1>
-                    <p className="text-sm text-gray-500 mt-1">Manage users, SPOCs, integrations, and placement analytics.</p>
-                </div>
-                <Link to="/dashboard" className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-500 hover:text-primary-600 transition-colors">
-                    <ArrowLeft className="w-4 h-4" /> Dashboard
-                </Link>
-            </div>
-
-            {/* Action message */}
-            <AnimatePresence>
-                {actionMsg && (
-                    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-                        className="mb-5 flex items-center justify-between gap-3 p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-xl">
-                        <span className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> {actionMsg}</span>
-                        <button onClick={() => setActionMsg('')} className="text-emerald-600 hover:text-emerald-800"><XCircle className="w-4 h-4" /></button>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
-            {/* Tabs */}
-            <div className="flex items-center gap-1 border-b border-gray-200 mb-6 overflow-x-auto pb-px">
-                {TABS.map(tab => (
-                    <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-                        className={clsx('inline-flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap',
-                            activeTab === tab.key
-                                ? 'border-primary-600 text-primary-700'
-                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300')}>
-                        <tab.icon className="w-4 h-4" /> {tab.label}
-                        {tab.key === 'users' && <span className="text-xs bg-gray-100 px-1.5 py-0.5 rounded-md font-bold text-gray-500">{total}</span>}
-                        {tab.key === 'spocs' && pendingSpocs.length > 0 && (
-                            <span className="w-5 h-5 text-xs bg-red-500 text-white rounded-full flex items-center justify-center">{pendingSpocs.length}</span>
-                        )}
-                    </button>
-                ))}
-            </div>
-
-            {/* ═══════════════ STATS TAB ═══════════════ */}
-            {activeTab === 'stats' && stats && (
-                <div className="space-y-6">
-                    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-                        {[
-                            { label: 'Total Students', value: stats.totalStudents, icon: GraduationCap, color: 'text-primary-600', bg: 'bg-primary-50', border: 'border-primary-100' },
-                            { label: 'Jobs Posted', value: stats.totalJobs, icon: Briefcase, color: 'text-violet-600', bg: 'bg-violet-50', border: 'border-violet-100' },
-                            { label: 'Applications', value: stats.totalApplications, icon: FileText, color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-100' },
-                            { label: 'Placed Students', value: stats.placedStudents ?? 0, icon: Award, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-                            { label: 'Locked Profiles', value: stats.lockedProfiles ?? 0, icon: Lock, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100' },
-                        ].map(stat => (
+        <div className="min-h-full bg-slate-100/80" data-testid="admin-dashboard">
+            <div className="max-w-[1680px] mx-auto flex flex-col lg:flex-row min-h-full">
+                <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-slate-200/80 bg-white/95 backdrop-blur-sm py-6 px-4 shadow-[1px_0_0_0_rgba(15,23,42,0.04)] lg:min-h-screen">
+                    <div className="px-1 mb-8">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm ring-1 ring-slate-900/5 mb-4">
+                            <Shield className="w-[18px] h-[18px]" aria-hidden />
+                        </div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Admin console</p>
+                        <h1 className="text-lg font-display font-semibold text-slate-900 leading-snug mt-1">Coordinator</h1>
+                        <p className="text-[13px] text-slate-500 mt-2 leading-relaxed">
+                            Accounts, SPOC access, and outbound messaging.
+                        </p>
+                    </div>
+                    <nav className="flex flex-col gap-0.5 flex-1" aria-label="Admin sections">
+                        {TABS.map((tab) => (
                             <button
-                                key={stat.label}
+                                key={tab.key}
                                 type="button"
-                                onClick={() => stat.label === 'Placed Students' ? navigate('/placed-students') : undefined}
-                                className={`${stat.bg} ${stat.border} border rounded-2xl p-4 relative overflow-hidden text-left w-full ${stat.label === 'Placed Students' ? 'cursor-pointer hover:shadow-sm transition-all' : 'cursor-default'}`}
+                                onClick={() => setActiveTab(tab.key)}
+                                className={clsx(
+                                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-semibold transition-colors',
+                                    activeTab === tab.key
+                                        ? 'bg-slate-900 text-white shadow-sm'
+                                        : 'text-slate-600 hover:bg-slate-100/90'
+                                )}
                             >
-                                <div className="flex items-center gap-3">
-                                    <div className={`${stat.bg} p-2.5 rounded-xl`}>
-                                        <stat.icon className={`w-5 h-5 ${stat.color}`} />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs font-bold text-gray-500 uppercase tracking-wider leading-tight">{stat.label}</p>
-                                        <p className={`text-2xl font-black ${stat.color}`}>{stat.value}</p>
-                                    </div>
-                                </div>
+                                <tab.icon className={clsx('w-4 h-4 shrink-0', activeTab === tab.key ? 'text-white' : 'text-slate-500')} />
+                                <span className="flex-1 truncate">{tab.label}</span>
+                                {tab.key === 'users' && (
+                                    <span
+                                        className={clsx(
+                                            'text-[11px] px-2 py-0.5 rounded-md font-semibold tabular-nums',
+                                            activeTab === tab.key ? 'bg-white/15 text-white' : 'bg-slate-200/90 text-slate-700'
+                                        )}
+                                    >
+                                        {total}
+                                    </span>
+                                )}
+                                {tab.key === 'spocs' && pendingSpocs.length > 0 && (
+                                    <span className="min-w-[1.25rem] h-5 text-[10px] font-semibold bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm">
+                                        {pendingSpocs.length}
+                                    </span>
+                                )}
                             </button>
                         ))}
-                    </div>
+                    </nav>
+                    <Link
+                        to="/dashboard"
+                        className="mt-auto pt-4 mx-1 flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 transition-colors"
+                    >
+                        <ArrowLeft className="w-3.5 h-3.5 opacity-70" />
+                        Back to app
+                    </Link>
+                </aside>
 
-                    {/* Application Status Breakdown */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4">Application Status Breakdown</h3>
-                        <div className="flex flex-wrap gap-3">
-                            {Object.entries(stats.applicationsByStatus).map(([status, count]) => (
-                                <div key={status} className={`px-4 py-3 rounded-xl border ${statusBadge(status)} text-center min-w-[100px]`}>
-                                    <p className="text-2xl font-black">{count}</p>
-                                    <p className="text-xs font-bold uppercase tracking-wider mt-0.5">{status}</p>
-                                </div>
+                <div className="flex-1 min-w-0 flex flex-col">
+                    <div className="lg:hidden border-b border-slate-200 bg-white">
+                        <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
+                            <div>
+                                <p className="text-xs font-medium text-slate-500">Administration</p>
+                                <h1 className="text-xl font-display font-semibold text-slate-900 tracking-tight">Coordinator console</h1>
+                            </div>
+                            <Link
+                                to="/dashboard"
+                                className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-indigo-700 shrink-0"
+                            >
+                                <ArrowLeft className="w-3.5 h-3.5" /> Exit
+                            </Link>
+                        </div>
+                        <div className="flex items-center gap-1 overflow-x-auto px-2 pb-3">
+                            {TABS.map((tab) => (
+                                <button
+                                    key={tab.key}
+                                    type="button"
+                                    onClick={() => setActiveTab(tab.key)}
+                                    className={clsx(
+                                        'inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg whitespace-nowrap shrink-0 transition-colors',
+                                        activeTab === tab.key
+                                            ? 'bg-slate-900 text-white shadow-sm'
+                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    )}
+                                >
+                                    <tab.icon className="w-3.5 h-3.5" />
+                                    {tab.label}
+                                    {tab.key === 'users' && (
+                                        <span
+                                            className={clsx(
+                                                'text-[10px] px-1 rounded font-bold',
+                                                activeTab === tab.key ? 'bg-white/20' : 'bg-white/90 text-slate-600'
+                                            )}
+                                        >
+                                            {total}
+                                        </span>
+                                    )}
+                                    {tab.key === 'spocs' && pendingSpocs.length > 0 && (
+                                        <span className="min-w-[1rem] h-4 text-[9px] font-semibold bg-rose-600 text-white rounded-full flex items-center justify-center">
+                                            {pendingSpocs.length}
+                                        </span>
+                                    )}
+                                </button>
                             ))}
                         </div>
                     </div>
-                </div>
-            )}
+
+                    <main className="p-4 sm:p-6 lg:p-8 flex-1 lg:bg-[linear-gradient(180deg,rgba(248,250,252,0.5)_0%,transparent_28%)]">
+                        <div className="hidden lg:flex items-start justify-between gap-6 mb-8">
+                            <div>
+                                <p className="text-xs font-medium text-slate-500 mb-1">You are viewing</p>
+                                <h2 className="text-2xl font-display font-semibold tracking-tight text-slate-900">
+                                    {TABS.find((t) => t.key === activeTab)?.label ?? 'Admin'}
+                                </h2>
+                            </div>
+                            <div className="flex items-start gap-2.5 text-xs text-slate-500 max-w-xs text-right leading-relaxed rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 shadow-sm">
+                                <Settings2 className="w-4 h-4 shrink-0 text-slate-400 mt-0.5" aria-hidden />
+                                <span>Privileged session — sensitive actions are recorded for audit.</span>
+                            </div>
+                        </div>
+
+                        {actionMsg && (
+                            <div className="mb-6 flex items-center justify-between gap-3 p-4 rounded-xl bg-emerald-50/95 border border-emerald-200/80 text-emerald-900 text-sm font-semibold shadow-sm">
+                                <span className="flex items-center gap-2 min-w-0">
+                                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                                    <span className="truncate">{actionMsg}</span>
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setActionMsg('')}
+                                    className="text-emerald-700 hover:text-emerald-950 p-1 rounded-lg hover:bg-emerald-100/80 shrink-0"
+                                    aria-label="Dismiss"
+                                >
+                                    <XCircle className="w-4 h-4" />
+                                </button>
+                            </div>
+                        )}
 
             {/* ═══════════════ USERS TAB ═══════════════ */}
             {activeTab === 'users' && (
                 <div className="space-y-4">
-                    {/* Filters */}
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                        <div className="flex items-center gap-1.5 bg-gray-50 rounded-xl p-1 border border-gray-100">
-                            {['', 'STUDENT', 'SPOC', 'COORDINATOR'].map(role => (
-                                <button key={role} onClick={() => handleRoleFilter(role)}
-                                    className={clsx('px-3 py-2 rounded-lg text-xs font-bold transition-all',
-                                        roleFilter === role ? 'bg-white shadow-sm text-primary-700' : 'text-gray-500 hover:text-gray-700')}>
-                                    {role || 'All Roles'}
-                                </button>
-                            ))}
+                    <div
+                        className="rounded-2xl border border-slate-200/90 bg-white shadow-sm shadow-slate-900/[0.03] overflow-hidden"
+                        data-testid="users-table"
+                    >
+                        <div className="flex flex-col gap-4 border-b border-slate-100 bg-slate-50/50 px-4 py-4 sm:px-5 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                                <h3 className="text-base font-semibold text-slate-900 tracking-tight">Account directory</h3>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    <span className="font-medium text-slate-600 tabular-nums">{filteredUsers.length}</span>
+                                    {userSearch ? ' matching' : ' shown'}
+                                    {roleFilter ? ` · ${roleFilter}` : ''}
+                                    {total !== filteredUsers.length && !userSearch ? (
+                                        <span className="text-slate-400"> · {total} total</span>
+                                    ) : null}
+                                </p>
+                            </div>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 w-full sm:w-auto sm:justify-end">
+                                <div
+                                    className="inline-flex rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-sm"
+                                    role="group"
+                                    aria-label="Filter by role"
+                                >
+                                    {['', 'STUDENT', 'SPOC', 'COORDINATOR'].map((role) => (
+                                        <button
+                                            key={role || 'all'}
+                                            type="button"
+                                            onClick={() => handleRoleFilter(role)}
+                                            className={clsx(
+                                                'px-3 py-2 rounded-md text-xs font-semibold transition-all',
+                                                roleFilter === role
+                                                    ? 'bg-slate-900 text-white shadow-sm'
+                                                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                                            )}
+                                        >
+                                            {role || 'All'}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="relative w-full sm:w-64">
+                                    <Search
+                                        className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"
+                                        aria-hidden
+                                    />
+                                    <input
+                                        type="search"
+                                        placeholder="Search name or email…"
+                                        value={userSearch}
+                                        onChange={(e) => setUserSearch(e.target.value)}
+                                        className="w-full pl-10 pr-3 py-2.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200/80 focus:outline-none"
+                                    />
+                                </div>
+                            </div>
                         </div>
-                        <div className="relative flex-1 max-w-sm">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                            <input type="text" placeholder="Search name or email..." value={userSearch} onChange={e => setUserSearch(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 focus:outline-none bg-white shadow-sm" />
-                        </div>
-                    </div>
 
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden" data-testid="users-table">
-                        <table className="min-w-full divide-y divide-gray-50">
-                            <thead>
-                                <tr className="bg-gray-50/80">
-                                    <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">User</th>
-                                    <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Role</th>
-                                    <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Account</th>
-                                    <th className="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Profile Lock</th>
-                                    <th className="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-50">
-                                {filteredUsers.map(u => (
-                                    <tr key={u.id} className={clsx('hover:bg-gray-50/50 transition-colors', u.isDisabled && 'opacity-50')}>
-                                        <td className="px-5 py-3.5">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center flex-shrink-0">
-                                                    <Users className="w-4 h-4 text-gray-400" />
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-bold text-gray-900 truncate">{u.student ? `${u.student.firstName} ${u.student.lastName}` : '—'}</p>
-                                                    <p className="text-xs text-gray-500 truncate">{u.email}</p>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-5 py-3.5">
-                                            <span className={`px-2.5 py-1 text-xs font-bold rounded-lg border ${roleBadge(u.role)}`}>{u.role}</span>
-                                        </td>
-                                        <td className="px-5 py-3.5">
-                                            <span className={clsx('inline-flex items-center gap-1 text-xs font-bold',
-                                                u.isDisabled ? 'text-red-600' : 'text-emerald-600')}>
-                                                {u.isDisabled ? <><XCircle className="w-3.5 h-3.5" /> Disabled</> : <><CheckCircle2 className="w-3.5 h-3.5" /> Active</>}
-                                            </span>
-                                        </td>
-                                        <td className="px-5 py-3.5">
-                                            {u.student?.isLocked ? (
-                                                <div className="space-y-1">
-                                                    <span className="inline-flex items-center gap-1 text-xs font-bold text-red-600">
-                                                        <Lock className="w-3.5 h-3.5" /> Locked
-                                                    </span>
-                                                    {u.student.placementType && (
-                                                        <p className="text-xs text-gray-500">{u.student.placementType}</p>
-                                                    )}
-                                                    <button onClick={() => handleUnlock(u.id)}
-                                                        className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg hover:bg-amber-100 transition-colors mt-1">
-                                                        <Unlock className="w-3 h-3" /> Override Unlock
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600">
-                                                    <Unlock className="w-3.5 h-3.5" /> Free
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-5 py-3.5 text-right">
-                                            {u.isDisabled ? (
-                                                <button onClick={() => handleEnable(u.id)}
-                                                    className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg hover:bg-emerald-100 transition-colors">
-                                                    <UserCheck className="w-3.5 h-3.5" /> Enable
-                                                </button>
-                                            ) : (
-                                                <button onClick={() => handleDisable(u.id)}
-                                                    className="inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors">
-                                                    <UserX className="w-3.5 h-3.5" /> Disable
-                                                </button>
-                                            )}
-                                        </td>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-[760px] w-full text-left">
+                                <thead>
+                                    <tr className="border-b border-slate-100 bg-white">
+                                        <th className="px-4 sm:px-5 py-3 text-xs font-semibold text-slate-500 w-[38%]">User</th>
+                                        <th className="px-4 sm:px-5 py-3 text-xs font-semibold text-slate-500 whitespace-nowrap">Role</th>
+                                        <th className="px-4 sm:px-5 py-3 text-xs font-semibold text-slate-500 whitespace-nowrap">Status</th>
+                                        <th className="px-4 sm:px-5 py-3 text-xs font-semibold text-slate-500 min-w-[9rem]">Profile lock</th>
+                                        <th className="px-4 sm:px-5 py-3 text-right text-xs font-semibold text-slate-500 whitespace-nowrap w-px">
+                                            Actions
+                                        </th>
                                     </tr>
-                                ))}
-                                {filteredUsers.length === 0 && (
-                                    <tr><td colSpan={5} className="px-5 py-10 text-center text-gray-400 font-bold">No users found.</td></tr>
-                                )}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {filteredUsers.map((u) => {
+                                        const display = accountDisplayName(u);
+                                        const initials = initialsFromDisplayName(display);
+                                        const RoleIcon =
+                                            u.role === 'STUDENT' ? UserCircle : u.role === 'SPOC' ? ShieldCheck : Shield;
+                                        return (
+                                            <tr
+                                                key={u.id}
+                                                className={clsx(
+                                                    'transition-colors hover:bg-slate-50/80',
+                                                    u.isDisabled && 'opacity-[0.72]'
+                                                )}
+                                            >
+                                                <td className="px-4 sm:px-5 py-3.5">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <div
+                                                            className={clsx(
+                                                                'flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[11px] font-bold tracking-wide',
+                                                                roleAvatarRing(u.role)
+                                                            )}
+                                                            aria-hidden
+                                                        >
+                                                            {initials}
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <p className="text-sm font-semibold text-slate-900 truncate">
+                                                                    {display}
+                                                                </p>
+                                                                <RoleIcon
+                                                                    className="w-3.5 h-3.5 text-slate-400 shrink-0 hidden sm:block"
+                                                                    aria-hidden
+                                                                />
+                                                            </div>
+                                                            <p className="text-xs text-slate-500 truncate mt-0.5">{u.email}</p>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 sm:px-5 py-3.5 align-top">
+                                                    <span
+                                                        className={clsx(
+                                                            'inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-md border',
+                                                            roleBadge(u.role)
+                                                        )}
+                                                    >
+                                                        {u.role}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 sm:px-5 py-3.5 align-top">
+                                                    <span
+                                                        className={clsx(
+                                                            'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold',
+                                                            u.isDisabled
+                                                                ? 'border-rose-200 bg-rose-50 text-rose-800'
+                                                                : 'border-emerald-200/90 bg-emerald-50/90 text-emerald-800'
+                                                        )}
+                                                    >
+                                                        {u.isDisabled ? (
+                                                            <>
+                                                                <XCircle className="w-3 h-3" aria-hidden />
+                                                                Disabled
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <CheckCircle2 className="w-3 h-3" aria-hidden />
+                                                                Active
+                                                            </>
+                                                        )}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 sm:px-5 py-3.5 align-top text-sm">
+                                                    {u.role === 'STUDENT' ? (
+                                                        u.student?.isLocked ? (
+                                                            <div className="space-y-1.5">
+                                                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700">
+                                                                    <Lock className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                                                    Locked
+                                                                </span>
+                                                                {u.student.placementType && (
+                                                                    <p className="text-xs text-slate-500">{u.student.placementType}</p>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleUnlock(u.id)}
+                                                                    className="inline-flex items-center gap-1 text-xs font-semibold text-amber-900 bg-amber-50 border border-amber-200/90 px-2 py-1 rounded-md hover:bg-amber-100/90 transition-colors"
+                                                                >
+                                                                    <Unlock className="w-3 h-3" aria-hidden />
+                                                                    Unlock
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-600">
+                                                                <Unlock className="w-3.5 h-3.5 text-slate-400" aria-hidden />
+                                                                Unlocked
+                                                            </span>
+                                                        )
+                                                    ) : (
+                                                        <span className="text-xs text-slate-400">—</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 sm:px-5 py-3.5 text-right align-top whitespace-nowrap">
+                                                    {u.isDisabled ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleEnable(u.id)}
+                                                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200/90 px-3 py-1.5 rounded-lg hover:bg-emerald-100/80 transition-colors"
+                                                        >
+                                                            <UserCheck className="w-3.5 h-3.5" aria-hidden />
+                                                            Enable
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDisable(u.id)}
+                                                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-800 bg-rose-50 border border-rose-200/90 px-3 py-1.5 rounded-lg hover:bg-rose-100/80 transition-colors"
+                                                        >
+                                                            <UserX className="w-3.5 h-3.5" aria-hidden />
+                                                            Disable
+                                                        </button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {filteredUsers.length === 0 && (
+                                        <tr>
+                                            <td colSpan={5} className="px-5 py-14 text-center">
+                                                <Users className="w-10 h-10 text-slate-200 mx-auto mb-3" aria-hidden />
+                                                <p className="text-sm font-semibold text-slate-600">No accounts match</p>
+                                                <p className="text-xs text-slate-500 mt-1">Try another role filter or search term.</p>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             )}
 
             {/* ═══════════════ SPOC TAB ═══════════════ */}
             {activeTab === 'spocs' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" data-testid="spoc-management">
-                    {/* Pending Approvals */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
-                        <div className="p-5 border-b border-gray-100">
-                            <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                                <Clock className="w-5 h-5 text-amber-500" /> Pending Approvals
+                <div className="space-y-5">
+                    <p className="text-xs font-medium text-slate-500">SPOC access and onboarding</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" data-testid="spoc-management">
+                    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                        <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                            <h3 className="text-base font-display font-bold text-slate-900 flex items-center gap-2">
+                                <Clock className="w-5 h-5 text-amber-600 shrink-0" /> Pending approvals
                                 {pendingSpocs.length > 0 && (
-                                    <span className="ml-auto w-6 h-6 text-xs bg-red-500 text-white rounded-full flex items-center justify-center font-bold">{pendingSpocs.length}</span>
+                                    <span className="ml-auto min-w-[1.5rem] h-6 px-1.5 text-[11px] font-semibold bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm">{pendingSpocs.length}</span>
                                 )}
                             </h3>
                         </div>
@@ -626,11 +755,10 @@ export default function AdminDashboard() {
                         </div>
                     </div>
 
-                    {/* Active SPOCs & Permissions */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
-                        <div className="p-5 border-b border-gray-100">
-                            <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                                <ShieldCheck className="w-5 h-5 text-emerald-500" /> Active SPOCs & Permissions
+                    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                        <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                            <h3 className="text-base font-display font-bold text-slate-900 flex items-center gap-2">
+                                <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" /> Active SPOCs and permissions
                                 <span className="text-xs text-gray-400 font-medium ml-1">({approvedSpocs.length})</span>
                             </h3>
                         </div>
@@ -677,84 +805,77 @@ export default function AdminDashboard() {
                             ))}
                         </div>
                     </div>
+                    </div>
                 </div>
             )}
 
-            {/* ═══════════════ NOTIFICATIONS TAB ═══════════════ */}
-            {activeTab === 'notifications' && (
-                <div className="space-y-6" data-testid="notifications-tab">
-                    {/* WhatsApp Toggle Card */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            {/* ═══════════════ EMAIL AUTOMATION TAB ═══════════════ */}
+            {activeTab === 'email' && (
+                <div className="space-y-6" data-testid="email-automation-tab">
+                    <p className="text-xs font-medium text-slate-500">Placement email automation</p>
+                    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="flex items-center gap-4">
-                            <div className={clsx('w-12 h-12 rounded-2xl flex items-center justify-center', whatsappEnabled ? 'bg-emerald-50' : 'bg-gray-100')}>
-                                <MessageSquare className={clsx('w-6 h-6', whatsappEnabled ? 'text-emerald-600' : 'text-gray-400')} />
+                            <div className={clsx('w-12 h-12 rounded-2xl flex items-center justify-center', emailEnabled ? 'bg-blue-50' : 'bg-gray-100')}>
+                                <Mail className={clsx('w-6 h-6', emailEnabled ? 'text-blue-600' : 'text-gray-400')} />
                             </div>
                             <div>
-                                <h3 className="text-base font-bold text-gray-900">WhatsApp Integration</h3>
-                                <p className="text-xs text-gray-500 mt-0.5">Toggle Zapier/Twilio webhook notifications for placement events.</p>
+                                <h3 className="text-base font-bold text-gray-900">Placement Email Automation</h3>
+                                <p className="text-xs text-gray-500 mt-0.5">Same flow as SPOC email publish, with coordinator-level enable/disable and template control.</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
-                            <span className={clsx('text-xs font-bold', whatsappEnabled ? 'text-emerald-600' : 'text-red-600')}>
-                                {whatsappEnabled ? 'Enabled' : 'Offline (Mocked)'}
+                            <span className={clsx('text-xs font-bold', emailEnabled ? 'text-emerald-600' : 'text-red-600')}>
+                                {emailEnabled ? 'Enabled' : 'Disabled (Mocked)'}
                             </span>
-                            <button onClick={() => toggleWhatsappSettings(!whatsappEnabled)}
-                                className={clsx('p-1 rounded-full transition-colors', whatsappEnabled ? 'text-emerald-600' : 'text-gray-400')}>
-                                {whatsappEnabled ? <ToggleRight className="w-10 h-10" /> : <ToggleLeft className="w-10 h-10" />}
+                            <button onClick={() => toggleEmailSettings(!emailEnabled)}
+                                className={clsx('p-1 rounded-full transition-colors', emailEnabled ? 'text-blue-600' : 'text-gray-400')}>
+                                {emailEnabled ? <ToggleRight className="w-10 h-10" /> : <ToggleLeft className="w-10 h-10" />}
                             </button>
                         </div>
                     </div>
 
-                    {/* WhatsApp Templates */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6" data-testid="notification-templates">
+                    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6" data-testid="email-template-card">
                         <div className="mb-4">
-                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">WhatsApp Message Templates</h3>
-                            <p className="text-xs text-gray-500 mt-1">Edit placeholders like <code>{'{student_name}'}</code>, <code>{'{company_name}'}</code>, <code>{'{role}'}</code>, <code>{'{status}'}</code>, <code>{'{date}'}</code>.</p>
+                            <h3 className="text-sm font-display font-bold text-slate-900">Placement result email template</h3>
+                            <p className="text-xs text-gray-500 mt-1">
+                                Placeholders: <code>{'{student_name}'}</code>, <code>{'{company_name}'}</code>, <code>{'{role}'}</code>, <code>{'{ctc}'}</code>, <code>{'{status}'}</code>, <code>{'{placement_year}'}</code>.
+                            </p>
                         </div>
-                        <div className="space-y-4">
-                            {notificationTemplates.length === 0 ? (
-                                <p className="text-sm text-gray-400 font-bold">No templates available.</p>
-                            ) : (
-                                notificationTemplates.map((template) => (
-                                    <div key={template.type} className="border border-gray-100 rounded-xl p-4 bg-gray-50/50">
-                                        <div className="flex items-center justify-between gap-3 mb-2">
-                                            <p className="text-sm font-bold text-gray-900">{template.type}</p>
-                                            <span className={clsx('text-[10px] px-2 py-0.5 rounded-full border font-bold',
-                                                template.source === 'DB' ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-gray-600 bg-gray-100 border-gray-200')}>
-                                                {template.source}
-                                            </span>
-                                        </div>
-                                        <textarea
-                                            value={template.templateText}
-                                            onChange={(e) => updateTemplateDraft(template.type, e.target.value)}
-                                            rows={3}
-                                            className="w-full rounded-lg border border-gray-200 bg-white text-sm px-3 py-2.5 focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 focus:outline-none"
-                                        />
-                                        <div className="flex justify-end mt-3">
-                                            <button
-                                                onClick={() => saveNotificationTemplate(template.type)}
-                                                disabled={savingTemplateType === template.type}
-                                                className={clsx(
-                                                    'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all',
-                                                    savingTemplateType === template.type
-                                                        ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                                                        : 'bg-primary-50 text-primary-700 border-primary-200 hover:bg-primary-100'
-                                                )}
-                                            >
-                                                <Save className="w-3.5 h-3.5" />
-                                                {savingTemplateType === template.type ? 'Saving...' : 'Save Template'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
+                        <div className="border border-gray-100 rounded-xl p-4 bg-gray-50/50">
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                                <p className="text-sm font-bold text-gray-900">Default template used by email webhook</p>
+                                <span className={clsx('text-[10px] px-2 py-0.5 rounded-full border font-bold',
+                                    emailTemplateSource === 'DB' ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-gray-600 bg-gray-100 border-gray-200')}>
+                                    {emailTemplateSource}
+                                </span>
+                            </div>
+                            <textarea
+                                value={emailTemplate}
+                                onChange={(e) => setEmailTemplate(e.target.value)}
+                                rows={4}
+                                className="w-full rounded-lg border border-gray-200 bg-white text-sm px-3 py-2.5 focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 focus:outline-none"
+                            />
+                            <div className="flex justify-end mt-3">
+                                <button
+                                    onClick={saveEmailTemplate}
+                                    disabled={savingEmailTemplate}
+                                    className={clsx(
+                                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all',
+                                        savingEmailTemplate
+                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                            : 'bg-primary-50 text-primary-700 border-primary-200 hover:bg-primary-100'
+                                    )}
+                                >
+                                    <Save className="w-3.5 h-3.5" />
+                                    {savingEmailTemplate ? 'Saving...' : 'Save Template'}
+                                </button>
+                            </div>
                         </div>
                     </div>
 
-                    {/* Notification Logs */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden" data-testid="notification-logs">
-                        <div className="p-5 border-b border-gray-100">
-                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Recent Outbound Messages</h3>
+                    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden" data-testid="email-logs">
+                        <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                            <h3 className="text-sm font-display font-bold text-slate-900">Recent placement email logs</h3>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="min-w-full divide-y divide-gray-50">
@@ -768,15 +889,15 @@ export default function AdminDashboard() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-50">
-                                    {logs.length === 0 ? (
-                                        <tr><td colSpan={5} className="px-5 py-10 text-center text-gray-400 font-bold">No outbound webhooks found.</td></tr>
-                                    ) : logs.map(log => (
+                                    {emailLogs.length === 0 ? (
+                                        <tr><td colSpan={5} className="px-5 py-10 text-center text-gray-400 font-bold">No email logs found.</td></tr>
+                                    ) : emailLogs.map(log => (
                                         <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
                                             <td className="px-5 py-3 text-xs text-gray-500 whitespace-nowrap font-medium">
                                                 {new Date(log.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                                             </td>
                                             <td className="px-5 py-3">
-                                                <p className="text-sm font-bold text-gray-900">{log.user.student ? `${log.user.student.firstName} ${log.user.student.lastName}` : '—'}</p>
+                                                <p className="text-sm font-semibold text-slate-900">{logUserDisplayName(log.user)}</p>
                                                 <p className="text-xs text-gray-500">{log.user.email}</p>
                                             </td>
                                             <td className="px-5 py-3 text-sm text-gray-600 max-w-[300px] truncate">"{log.message}"</td>
@@ -803,8 +924,8 @@ export default function AdminDashboard() {
             {/* ═══════════════ LINKEDIN TAB ═══════════════ */}
             {activeTab === 'linkedin' && (
                 <div className="space-y-6">
-                    {/* LinkedIn Toggle Card */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <p className="text-xs font-medium text-slate-500">LinkedIn announcements</p>
+                    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="flex items-center gap-4">
                             <div className={clsx('w-12 h-12 rounded-2xl flex items-center justify-center', linkedInEnabled ? 'bg-blue-50' : 'bg-gray-100')}>
                                 <Linkedin className={clsx('w-6 h-6', linkedInEnabled ? 'text-blue-600' : 'text-gray-400')} />
@@ -825,10 +946,9 @@ export default function AdminDashboard() {
                         </div>
                     </div>
 
-                    {/* LinkedIn Logs */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                        <div className="p-5 border-b border-gray-100">
-                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Publish History</h3>
+                    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                        <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                            <h3 className="text-sm font-display font-bold text-slate-900">Publish history</h3>
                         </div>
                         <div className="overflow-x-auto">
                             <table className="min-w-full divide-y divide-gray-50">
@@ -876,101 +996,9 @@ export default function AdminDashboard() {
                     </div>
                 </div>
             )}
-
-            {/* ═══════════════ ANALYTICS TAB ═══════════════ */}
-            {activeTab === 'analytics' && (
-                <div className="space-y-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Branch Comparison */}
-                        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                            <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                <BarChart3 className="w-4 h-4 text-gray-400" /> Placements by Branch
-                            </h4>
-                            {branchStats.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={branchStats} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                        <XAxis dataKey="branch" tick={{ fontSize: 12 }} />
-                                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                                        <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', fontSize: '13px' }} />
-                                        <Legend />
-                                        <Bar dataKey="placementCount" fill="#6366f1" name="Students Placed" radius={[6, 6, 0, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            ) : (
-                                <div className="flex items-center justify-center h-[300px] text-gray-400 font-bold text-sm">No branch data available</div>
-                            )}
-                        </div>
-
-                        {/* Placement Trends */}
-                        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                            <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                <TrendingUp className="w-4 h-4 text-gray-400" /> Placement Trends (Monthly)
-                            </h4>
-                            {trendStats.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <LineChart data={trendStats} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                                        <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-                                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                                        <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e5e7eb', fontSize: '13px' }} />
-                                        <Legend />
-                                        <Line type="monotone" dataKey="placements" stroke="#10b981" strokeWidth={3} name="Total Placements" dot={{ r: 5, fill: '#10b981' }} />
-                                    </LineChart>
-                                </ResponsiveContainer>
-                            ) : (
-                                <div className="flex items-center justify-center h-[300px] text-gray-400 font-bold text-sm">No trend data available</div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* ATS Configuration */}
-                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 max-w-2xl">
-                        <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-2 flex items-center gap-2">
-                            <Sliders className="w-4 h-4 text-gray-400" /> ATS Engine Tuning
-                        </h4>
-                        <p className="text-xs text-gray-500 mb-5">Adjust keyword-matching weights. <strong>All weights must sum to 1.0 (100%).</strong></p>
-
-                        {atsConfig ? (
-                            <div className="space-y-4">
-                                {Object.entries(atsConfig).map(([key, val]) => (
-                                    <div key={key} className="flex items-center gap-4">
-                                        <label className="w-36 text-sm font-bold text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
-                                        <div className="flex-1 relative">
-                                            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                                                <div className="h-full bg-primary-500 rounded-full transition-all" style={{ width: `${val * 100}%` }} />
-                                            </div>
-                                        </div>
-                                        <input type="number" step="0.05" min="0" max="1" value={val}
-                                            onChange={(e) => setAtsConfig({ ...atsConfig, [key]: parseFloat(e.target.value) || 0 })}
-                                            className="w-20 text-right rounded-lg border border-gray-200 px-2.5 py-2 text-sm font-bold focus:border-primary-500 focus:outline-none" />
-                                        <span className="w-14 text-xs font-bold text-gray-400 text-right">{Math.round(val * 100)}%</span>
-                                    </div>
-                                ))}
-
-                                <div className="flex justify-between items-center pt-4 border-t border-dashed border-gray-200">
-                                    <span className={clsx('text-sm font-bold',
-                                        Math.abs(Object.values(atsConfig).reduce((a, b) => a + b, 0) - 1) < 0.01 ? 'text-emerald-600' : 'text-red-600')}>
-                                        Total: {(Object.values(atsConfig).reduce((a, b) => a + b, 0)).toFixed(2)}
-                                    </span>
-                                    <button onClick={async () => {
-                                        try {
-                                            const res = await axios.put(`${API()}/api/ats/config`, atsConfig, { headers });
-                                            setActionMsg('ATS weights saved successfully.');
-                                            setAtsConfig(res.data.data);
-                                        } catch (e: any) { alert(e.response?.data?.message || 'Failed to update weights.'); }
-                                    }}
-                                        className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all transform active:scale-95">
-                                        <Save className="w-4 h-4" /> Save Weights
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-400">Loading ATS Config...</p>
-                        )}
-                    </div>
+                    </main>
                 </div>
-            )}
+            </div>
         </div>
     );
 }

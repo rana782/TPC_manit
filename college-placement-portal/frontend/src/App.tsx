@@ -22,6 +22,15 @@ import AnalyticsRedesignPage from './pages/AnalyticsRedesignPage';
 import AlumniDirectoryPage from './pages/AlumniDirectoryPage';
 import PlacedStudents from './pages/PlacedStudents';
 
+/** SPOC-only: coordinators must not access job CRUD UI (sidebar + deep links). */
+function JobsManagementRoute() {
+    const { user, loading } = useAuth();
+    if (loading) return null;
+    if (user?.role === 'COORDINATOR') return <Navigate to="/admin" replace />;
+    if (user?.role !== 'SPOC') return <Navigate to="/dashboard" replace />;
+    return <JobsManagement />;
+}
+
 function Home() {
     const { user, loading } = useAuth();
     if (loading) return null;
@@ -34,7 +43,7 @@ function Home() {
 function App() {
     return (
         <AuthProvider>
-            <Router>
+            <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
                 <Routes>
                     {/* Public auth routes */}
                     <Route path="/" element={<Home />} />
@@ -47,7 +56,7 @@ function App() {
                         <Route path="/dashboard" element={<DashboardOrRedirect />} />
                         <Route path="/profile" element={<Profile />} />
                         <Route path="/resumes" element={<Resumes />} />
-                        <Route path="/jobs-management" element={<JobsManagement />} />
+                        <Route path="/jobs-management" element={<JobsManagementRoute />} />
                         <Route path="/jobs/:id/details" element={<JobDetails />} />
                         <Route path="/job-board" element={<JobBoard />} />
                         <Route path="/admin" element={<AdminDashboard />} />

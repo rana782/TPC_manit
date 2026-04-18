@@ -3,9 +3,7 @@
  * Optional ?year=YYYY scopes placement/application/job-created/stage metrics to that calendar year.
  */
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 export function parseYearQuery(req: Request): number | null {
     const raw = req.query.year;
@@ -40,6 +38,7 @@ function mean(nums: number[]): number | null {
     return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
+
 /** Applications filter: appliedAt in year (if set). */
 function applicationWhere(year: number | null) {
     if (year == null) return {};
@@ -70,7 +69,7 @@ async function computeOverviewPayload(year: number | null) {
     });
     const cohortStudentIds = [...new Set(cohortRows.map((r) => r.studentId))];
 
-    const [totalStudentsAll, placementsInScope, jobsPublished, distinctCompanies, totalApplications] = await Promise.all([
+    const [totalStudentsAll, placementsInScope, jobsPublished, companyNameRows, totalApplications] = await Promise.all([
         prisma.student.count(),
         prisma.placementRecord.findMany({
             where: placeWh,
@@ -84,7 +83,6 @@ async function computeOverviewPayload(year: number | null) {
         }),
         prisma.job.findMany({
             where: { status: 'PUBLISHED', ...(year != null ? jobWh : {}) },
-            distinct: ['companyName'],
             select: { companyName: true },
         }),
         prisma.jobApplication.count({ where: appWh }),
@@ -120,7 +118,9 @@ async function computeOverviewPayload(year: number | null) {
         placedStudents,
         placementRatePct,
         totalJobsPublished: jobsPublished,
-        totalCompanies: distinctCompanies.length,
+        totalCompanies: new Set(
+            companyNameRows.map((j) => j.companyName.trim()).filter(Boolean)
+        ).size,
         totalApplications,
         averageCtcLpa: mean(ctcVals),
         medianCtcLpa: median(ctcVals),
@@ -145,60 +145,63 @@ export const getDashboardOverview = async (req: Request, res: Response) => {
     }
 };
 
+async function computeTrendsPayload(year: number | null) {
+    const [placements, jobs, apps] = await Promise.all([
+        prisma.placementRecord.findMany({ select: { placedAt: true } }),
+        prisma.job.findMany({ where: { status: 'PUBLISHED' }, select: { createdAt: true } }),
+        prisma.jobApplication.findMany({ select: { appliedAt: true } }),
+    ]);
+
+    const bucket = (dates: Date[], getY: (d: Date) => number) => {
+        const m: Record<number, number> = {};
+        for (const d of dates) {
+            const y = getY(d);
+            m[y] = (m[y] || 0) + 1;
+        }
+        return m;
+    };
+
+    const py = bucket(
+        placements.map((p) => new Date(p.placedAt)),
+        (d) => d.getFullYear()
+    );
+    const jy = bucket(
+        jobs.map((j) => new Date(j.createdAt)),
+        (d) => d.getFullYear()
+    );
+    const ay = bucket(
+        apps.map((a) => new Date(a.appliedAt)),
+        (d) => d.getFullYear()
+    );
+
+    const allYears = [...new Set([...Object.keys(py), ...Object.keys(jy), ...Object.keys(ay)].map(Number))].sort(
+        (a, b) => a - b
+    );
+    if (!allYears.length) {
+        return [];
+    }
+
+    const endY = year ?? allYears[allYears.length - 1]!;
+    const startY = Math.min(...allYears.filter((y) => y <= endY));
+    const windowStart = Math.max(startY, endY - 9);
+
+    const trends: { year: number; placedStudents: number; jobsPosted: number; applications: number }[] = [];
+    for (let y = windowStart; y <= endY; y++) {
+        trends.push({
+            year: y,
+            placedStudents: py[y] || 0,
+            jobsPosted: jy[y] || 0,
+            applications: ay[y] || 0,
+        });
+    }
+    return trends;
+}
+
 // GET /api/analytics/trends?year= optional end anchor — returns window of years with data
 export const getDashboardTrends = async (req: Request, res: Response) => {
     try {
         const year = parseYearQuery(req);
-
-        const [placements, jobs, apps] = await Promise.all([
-            prisma.placementRecord.findMany({ select: { placedAt: true } }),
-            prisma.job.findMany({ where: { status: 'PUBLISHED' }, select: { createdAt: true } }),
-            prisma.jobApplication.findMany({ select: { appliedAt: true } }),
-        ]);
-
-        const bucket = (dates: Date[], getY: (d: Date) => number) => {
-            const m: Record<number, number> = {};
-            for (const d of dates) {
-                const y = getY(d);
-                m[y] = (m[y] || 0) + 1;
-            }
-            return m;
-        };
-
-        const py = bucket(
-            placements.map((p) => new Date(p.placedAt)),
-            (d) => d.getFullYear()
-        );
-        const jy = bucket(
-            jobs.map((j) => new Date(j.createdAt)),
-            (d) => d.getFullYear()
-        );
-        const ay = bucket(
-            apps.map((a) => new Date(a.appliedAt)),
-            (d) => d.getFullYear()
-        );
-
-        const allYears = [...new Set([...Object.keys(py), ...Object.keys(jy), ...Object.keys(ay)].map(Number))].sort(
-            (a, b) => a - b
-        );
-        if (!allYears.length) {
-            return res.json({ success: true, year: year ?? 'all', trends: [] });
-        }
-
-        const endY = year ?? allYears[allYears.length - 1]!;
-        const startY = Math.min(...allYears.filter((y) => y <= endY));
-        const windowStart = Math.max(startY, endY - 9);
-
-        const trends = [];
-        for (let y = windowStart; y <= endY; y++) {
-            trends.push({
-                year: y,
-                placedStudents: py[y] || 0,
-                jobsPosted: jy[y] || 0,
-                applications: ay[y] || 0,
-            });
-        }
-
+        const trends = await computeTrendsPayload(year);
         return res.json({ success: true, year: year ?? 'all', trends });
     } catch (e) {
         console.error('[analytics/trends]', e);
@@ -301,73 +304,79 @@ export const getDashboardBranch = async (req: Request, res: Response) => {
     }
 };
 
+async function computeCompanyDashboardRows(year: number | null) {
+    const appWh = applicationWhere(year);
+    const placeWh = placementWhere(year);
+    const jobWh = jobCreatedWhere(year);
+
+    const jobs = await prisma.job.findMany({
+        where: { status: 'PUBLISHED', ...(year != null ? jobWh : {}) },
+        select: { companyName: true, id: true },
+    });
+
+    const apps = await prisma.jobApplication.findMany({
+        where: appWh,
+        select: { jobId: true },
+    });
+
+    const placements = await prisma.placementRecord.findMany({
+        where: placeWh,
+        select: { companyName: true, ctc: true },
+    });
+
+    const jobCompany = new Map(jobs.map((j) => [j.id, j.companyName.trim() || 'Unknown']));
+    const appsPerCompany: Record<string, number> = {};
+    for (const a of apps) {
+        const c = jobCompany.get(a.jobId) || 'Unknown';
+        appsPerCompany[c] = (appsPerCompany[c] || 0) + 1;
+    }
+
+    const jobsPerCompany: Record<string, number> = {};
+    for (const j of jobs) {
+        const c = j.companyName.trim() || 'Unknown';
+        jobsPerCompany[c] = (jobsPerCompany[c] || 0) + 1;
+    }
+
+    const placePerCompany: Record<string, number> = {};
+    const ctcPerCompany: Record<string, number[]> = {};
+    for (const p of placements) {
+        const c = (p.companyName || 'Unknown').trim();
+        placePerCompany[c] = (placePerCompany[c] || 0) + 1;
+        const n = parseCtcToNumber(p.ctc);
+        if (n != null) {
+            if (!ctcPerCompany[c]) ctcPerCompany[c] = [];
+            ctcPerCompany[c]!.push(n);
+        }
+    }
+
+    const companyKeys = [
+        ...new Set([...Object.keys(appsPerCompany), ...Object.keys(placePerCompany), ...Object.keys(jobsPerCompany)]),
+    ].sort();
+
+    const rows = companyKeys.map((companyName) => {
+        const ja = appsPerCompany[companyName] || 0;
+        const jp = placePerCompany[companyName] || 0;
+        const jn = jobsPerCompany[companyName] || 0;
+        const ctcs = ctcPerCompany[companyName] || [];
+        return {
+            companyName,
+            jobsPosted: jn,
+            placements: jp,
+            applications: ja,
+            averageCtcLpa: mean(ctcs),
+            conversionRatePct: ja > 0 ? Math.round((jp / ja) * 10000) / 100 : jp > 0 ? 100 : 0,
+        };
+    });
+
+    rows.sort((a, b) => b.placements - a.placements);
+    return rows;
+}
+
 // GET /api/analytics/company?year=
 export const getDashboardCompany = async (req: Request, res: Response) => {
     try {
         const year = parseYearQuery(req);
-        const appWh = applicationWhere(year);
-        const placeWh = placementWhere(year);
-        const jobWh = jobCreatedWhere(year);
-
-        const jobs = await prisma.job.findMany({
-            where: { status: 'PUBLISHED', ...(year != null ? jobWh : {}) },
-            select: { companyName: true, id: true },
-        });
-
-        const apps = await prisma.jobApplication.findMany({
-            where: appWh,
-            select: { jobId: true },
-        });
-
-        const placements = await prisma.placementRecord.findMany({
-            where: placeWh,
-            select: { companyName: true, ctc: true },
-        });
-
-        const jobCompany = new Map(jobs.map((j) => [j.id, j.companyName.trim() || 'Unknown']));
-        const appsPerCompany: Record<string, number> = {};
-        for (const a of apps) {
-            const c = jobCompany.get(a.jobId) || 'Unknown';
-            appsPerCompany[c] = (appsPerCompany[c] || 0) + 1;
-        }
-
-        const jobsPerCompany: Record<string, number> = {};
-        for (const j of jobs) {
-            const c = j.companyName.trim() || 'Unknown';
-            jobsPerCompany[c] = (jobsPerCompany[c] || 0) + 1;
-        }
-
-        const placePerCompany: Record<string, number> = {};
-        const ctcPerCompany: Record<string, number[]> = {};
-        for (const p of placements) {
-            const c = (p.companyName || 'Unknown').trim();
-            placePerCompany[c] = (placePerCompany[c] || 0) + 1;
-            const n = parseCtcToNumber(p.ctc);
-            if (n != null) {
-                if (!ctcPerCompany[c]) ctcPerCompany[c] = [];
-                ctcPerCompany[c]!.push(n);
-            }
-        }
-
-        const companies = [...new Set([...Object.keys(appsPerCompany), ...Object.keys(placePerCompany), ...Object.keys(jobsPerCompany)])].sort();
-
-        const rows = companies.map((companyName) => {
-            const ja = appsPerCompany[companyName] || 0;
-            const jp = placePerCompany[companyName] || 0;
-            const jn = jobsPerCompany[companyName] || 0;
-            const ctcs = ctcPerCompany[companyName] || [];
-            return {
-                companyName,
-                jobsPosted: jn,
-                placements: jp,
-                applications: ja,
-                averageCtcLpa: mean(ctcs),
-                conversionRatePct: ja > 0 ? Math.round((jp / ja) * 10000) / 100 : jp > 0 ? 100 : 0,
-            };
-        });
-
-        rows.sort((a, b) => b.placements - a.placements);
-
+        const rows = await computeCompanyDashboardRows(year);
         return res.json({ success: true, year: year ?? 'all', companies: rows });
     } catch (e) {
         console.error('[analytics/company]', e);
@@ -375,59 +384,204 @@ export const getDashboardCompany = async (req: Request, res: Response) => {
     }
 };
 
+async function computeCtcDashboardPayload(year: number | null) {
+    const placeWh = placementWhere(year);
+
+    const placements = await prisma.placementRecord.findMany({
+        where: placeWh,
+        select: { ctc: true },
+    });
+
+    const values = placements.map((p) => parseCtcToNumber(p.ctc)).filter((n): n is number => n != null);
+
+    const buckets = {
+        lt3: 0,
+        range3to6: 0,
+        range6to10: 0,
+        range10to15: 0,
+        gte15: 0,
+    };
+
+    for (const v of values) {
+        if (v < 3) buckets.lt3++;
+        else if (v < 6) buckets.range3to6++;
+        else if (v < 10) buckets.range6to10++;
+        else if (v < 15) buckets.range10to15++;
+        else buckets.gte15++;
+    }
+
+    const chart = [
+        { bucket: '<3 LPA', count: buckets.lt3 },
+        { bucket: '3-6 LPA', count: buckets.range3to6 },
+        { bucket: '6-10 LPA', count: buckets.range6to10 },
+        { bucket: '10-15 LPA', count: buckets.range10to15 },
+        { bucket: '15+ LPA', count: buckets.gte15 },
+    ];
+
+    const max = values.length ? Math.max(...values) : null;
+
+    return {
+        distribution: chart,
+        stats: {
+            count: values.length,
+            averageLpa: mean(values),
+            medianLpa: median(values),
+            maxLpa: max,
+        },
+    };
+}
+
 // GET /api/analytics/ctc?year=
 export const getDashboardCtc = async (req: Request, res: Response) => {
     try {
         const year = parseYearQuery(req);
-        const placeWh = placementWhere(year);
-
-        const placements = await prisma.placementRecord.findMany({
-            where: placeWh,
-            select: { ctc: true },
-        });
-
-        const values = placements.map((p) => parseCtcToNumber(p.ctc)).filter((n): n is number => n != null);
-
-        const buckets = {
-            lt3: 0,
-            range3to6: 0,
-            range6to10: 0,
-            range10to15: 0,
-            gte15: 0,
-        };
-
-        for (const v of values) {
-            if (v < 3) buckets.lt3++;
-            else if (v < 6) buckets.range3to6++;
-            else if (v < 10) buckets.range6to10++;
-            else if (v < 15) buckets.range10to15++;
-            else buckets.gte15++;
-        }
-
-        const chart = [
-            { bucket: '<3 LPA', count: buckets.lt3 },
-            { bucket: '3–6 LPA', count: buckets.range3to6 },
-            { bucket: '6–10 LPA', count: buckets.range6to10 },
-            { bucket: '10–15 LPA', count: buckets.range10to15 },
-            { bucket: '15+ LPA', count: buckets.gte15 },
-        ];
-
-        const max = values.length ? Math.max(...values) : null;
-
+        const { distribution, stats } = await computeCtcDashboardPayload(year);
         return res.json({
             success: true,
             year: year ?? 'all',
-            distribution: chart,
-            stats: {
-                count: values.length,
-                averageLpa: mean(values),
-                medianLpa: median(values),
-                maxLpa: max,
-            },
+            distribution,
+            stats,
         });
     } catch (e) {
         console.error('[analytics/ctc]', e);
         return res.status(500).json({ success: false, message: 'Failed to load CTC distribution.' });
+    }
+};
+
+/**
+ * Single round-trip for the placement analytics UI (avoids Supabase pooler / browser
+ * limits from five parallel heavy queries).
+ */
+export const getPlacementDashboardBundle = async (req: Request, res: Response) => {
+    try {
+        const year = parseYearQuery(req);
+        const overview = await computeOverviewPayload(year);
+        const trends = await computeTrendsPayload(year);
+        const { rows: branches, placementCtcSummary, totalPlacedStudents } = await computeBranchPlacementAnalytics(year);
+        const companies = await computeCompanyDashboardRows(year);
+        const { distribution, stats } = await computeCtcDashboardPayload(year);
+
+        return res.json({
+            success: true,
+            year: year ?? 'all',
+            overview,
+            trends,
+            branches,
+            placementCtcSummary,
+            totalPlacedStudents,
+            companies,
+            distribution,
+            stats,
+        });
+    } catch (e) {
+        console.error('[analytics/placement-dashboard]', e);
+        return res.status(500).json({ success: false, message: 'Failed to load placement analytics.' });
+    }
+};
+
+// GET /api/analytics/branch-report-excel?branch=...&year=
+export const exportBranchTimelineExcel = async (req: Request, res: Response) => {
+    try {
+        const branchRaw = String(req.query.branch || '').trim();
+        if (!branchRaw) {
+            return res.status(400).json({ success: false, message: 'branch query parameter is required.' });
+        }
+        const branch = branchRaw.slice(0, 120);
+        const year = parseYearQuery(req);
+        const placeWh = placementWhere(year);
+
+        const placements = await prisma.placementRecord.findMany({
+            where: {
+                ...placeWh,
+                student: { branch: branch },
+            },
+            include: {
+                student: {
+                    select: {
+                        firstName: true,
+                        lastName: true,
+                        scholarNo: true,
+                        linkedin: true,
+                        resumes: {
+                            where: { isActive: true },
+                            orderBy: { updatedAt: 'desc' },
+                            select: { fileUrl: true },
+                            take: 1,
+                        },
+                    },
+                },
+            },
+            orderBy: { placedAt: 'asc' },
+        });
+
+        const ctcVals = placements
+            .map((p) => parseCtcToNumber(p.ctc))
+            .filter((n): n is number => n != null);
+        const stats = {
+            min: ctcVals.length ? Math.min(...ctcVals) : null,
+            max: ctcVals.length ? Math.max(...ctcVals) : null,
+            avg: mean(ctcVals),
+            median: median(ctcVals),
+        };
+
+        const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const lines: string[] = [];
+        lines.push(
+            [
+                'placedAt',
+                'studentName',
+                'scholarNo',
+                'branch',
+                'companyName',
+                'role',
+                'ctc',
+                'resumeUrl',
+                'linkedinUrl',
+            ]
+                .map(esc)
+                .join(',')
+        );
+        for (const p of placements) {
+            const studentName = `${p.student.firstName || ''} ${p.student.lastName || ''}`.trim() || 'Unknown';
+            const scholarNo = p.student.scholarNo || 'N/A';
+            const resumeUrl = p.student.resumes?.[0]?.fileUrl || '';
+            const linkedinUrl = p.student.linkedin || '';
+            lines.push(
+                [
+                    new Date(p.placedAt).toISOString(),
+                    studentName,
+                    scholarNo,
+                    branch,
+                    p.companyName || '',
+                    p.role || '',
+                    p.ctc || '',
+                    resumeUrl,
+                    linkedinUrl,
+                ]
+                    .map(esc)
+                    .join(',')
+            );
+        }
+        lines.push('');
+        lines.push([ 'summaryMetric', 'value' ].map(esc).join(','));
+        lines.push([ 'branch', branch ].map(esc).join(','));
+        lines.push([ 'yearFilter', year ?? 'All years' ].map(esc).join(','));
+        lines.push([ 'placementsCount', placements.length ].map(esc).join(','));
+        lines.push([ 'ctcRecordsCount', ctcVals.length ].map(esc).join(','));
+        lines.push([ 'minCtcLpa', stats.min != null ? stats.min.toFixed(2) : '' ].map(esc).join(','));
+        lines.push([ 'maxCtcLpa', stats.max != null ? stats.max.toFixed(2) : '' ].map(esc).join(','));
+        lines.push([ 'avgCtcLpa', stats.avg != null ? stats.avg.toFixed(2) : '' ].map(esc).join(','));
+        lines.push([ 'medianCtcLpa', stats.median != null ? stats.median.toFixed(2) : '' ].map(esc).join(','));
+
+        const safeBranch = branch.replace(/[^a-z0-9_-]+/gi, '_').slice(0, 40) || 'branch';
+        const fileName = `branch_placement_timeline_${safeBranch}_${year ?? 'all'}.csv`;
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        return res.send(`\uFEFF${lines.join('\n')}`);
+    } catch (e) {
+        console.error('[analytics/branch-report-excel]', e);
+        return res.status(500).json({ success: false, message: 'Failed to generate branch report export.' });
     }
 };
 

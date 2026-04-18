@@ -120,9 +120,32 @@ async function seedSpocSession(page: import('@playwright/test').Page) {
   });
 }
 
+function placementDashboardBody(yearSuffix: string) {
+  return {
+    success: true,
+    year: yearSuffix,
+    overview: mockPayloads.overview.overview,
+    trends: mockPayloads.trends.trends,
+    branches: mockPayloads.branch.branches,
+    placementCtcSummary: mockPayloads.branch.placementCtcSummary,
+    totalPlacedStudents: mockPayloads.branch.totalPlacedStudents,
+    companies: mockPayloads.company.companies,
+    distribution: mockPayloads.ctc.distribution,
+    stats: mockPayloads.ctc.stats,
+  };
+}
+
 async function fulfillAnalytics(route: import('@playwright/test').Route, yearSuffix: string) {
   const u = route.request().url();
   const path = u.split('/api/analytics/')[1]?.split('?')[0] ?? '';
+  if (path === 'placement-dashboard') {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(placementDashboardBody(yearSuffix)),
+    });
+    return;
+  }
   const map: Record<string, unknown> = {
     overview: { ...mockPayloads.overview, year: yearSuffix },
     trends: { ...mockPayloads.trends, year: yearSuffix },
@@ -148,13 +171,13 @@ test.describe('Placement analytics dashboard', () => {
     await page.goto('/analytics', { waitUntil: 'domcontentloaded' });
 
     await expect(page.getByTestId('analytics-dashboard-page')).toBeVisible();
-    await expect(page.getByText('Placement command center')).toBeVisible();
+    await expect(page.getByText('Placement analytics')).toBeVisible();
     await expect(page.getByTestId('analytics-kpi-section')).toBeVisible();
-    await expect(page.getByText('120')).toBeVisible();
+    await expect(page.getByTestId('analytics-kpi-section').getByText('120')).toBeVisible();
     await expect(page.getByText('Placement trends')).toBeVisible();
-    await expect(page.getByText('Branch intelligence')).toBeVisible();
-    await expect(page.getByText('Placement package by branch')).toBeVisible();
-    await expect(page.getByText('Company intelligence')).toBeVisible();
+    await expect(page.getByText('Branch cohort vs placed')).toBeVisible();
+    await expect(page.getByText('Package spread by branch')).toBeVisible();
+    await expect(page.getByText('Company analytics')).toBeVisible();
     await expect(page.getByText('CTC distribution')).toBeVisible();
     await expect(page.getByTestId('analytics-export-summary')).toBeVisible();
 
@@ -166,7 +189,10 @@ test.describe('Placement analytics dashboard', () => {
     await page.locator('[data-testid="analytics-ctc-section"]').screenshot({ path: `${ROOT}/ctc/chart.png` });
 
     const overview2024 = page.waitForResponse(
-      (r) => r.url().includes('/api/analytics/overview') && r.url().includes('year=2024') && r.ok()
+      (r) =>
+        r.url().includes('/api/analytics/placement-dashboard') &&
+        r.url().includes('year=2024') &&
+        r.ok()
     );
     await page.getByTestId('analytics-year-filter').selectOption('2024');
     await overview2024;
@@ -176,6 +202,48 @@ test.describe('Placement analytics dashboard', () => {
   test('empty analytics responses do not crash UI', async ({ page }) => {
     await page.route(/\/api\/analytics\//, async (route) => {
       const path = route.request().url().split('/api/analytics/')[1]?.split('?')[0] ?? '';
+      if (path === 'placement-dashboard') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            year: 'all',
+            overview: {
+              totalStudents: 0,
+              placedStudents: 0,
+              placementRatePct: 0,
+              totalJobsPublished: 0,
+              totalCompanies: 0,
+              totalApplications: 0,
+              averageCtcLpa: null,
+              medianCtcLpa: null,
+              lockedProfiles: 0,
+              studentsWithBacklogs: 0,
+            },
+            trends: [],
+            branches: [],
+            totalPlacedStudents: 0,
+            placementCtcSummary: {
+              placementsWithCtc: 0,
+              minCtcLpa: null,
+              maxCtcLpa: null,
+              averageCtcLpa: null,
+              medianCtcLpa: null,
+            },
+            companies: [],
+            distribution: [
+              { bucket: '<3 LPA', count: 0 },
+              { bucket: '3-6 LPA', count: 0 },
+              { bucket: '6-10 LPA', count: 0 },
+              { bucket: '10-15 LPA', count: 0 },
+              { bucket: '15+ LPA', count: 0 },
+            ],
+            stats: { count: 0, averageLpa: null, medianLpa: null, maxLpa: null },
+          }),
+        });
+        return;
+      }
       const empty: Record<string, () => unknown> = {
         overview: () => ({ success: true, year: 'all', overview: null }),
         trends: () => ({ success: true, year: 'all', trends: [] }),

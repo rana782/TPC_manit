@@ -1,11 +1,18 @@
 import { useMemo } from 'react';
 import { CheckCircle2, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
+import { getViteApiOrigin } from '../../utils/apiBase';
 
 export type TimelineStage = {
     id?: string;
     name: string;
     scheduledDate?: string | Date | null;
+    notes?: string | null;
+    status?: string;
+    attachmentPath?: string | null;
+    shortlistDocPath?: string | null;
+    shortlistDocTitle?: string | null;
+    stageCandidateCount?: number;
 };
 
 type Props = {
@@ -29,6 +36,13 @@ function getOutcomeNote(applicationStatus?: string): string | null {
         return 'Outcome: Placed/Selected';
     }
     return null;
+}
+
+function stageDocHref(filePath: string | null | undefined): string | null {
+    if (!filePath) return null;
+    const origin = getViteApiOrigin().replace(/\/$/, '');
+    const normalized = filePath.startsWith('/') ? filePath : `/${filePath}`;
+    return origin ? `${origin}${normalized}` : normalized;
 }
 
 export default function JobStageStepper({ stages, currentStageIndex, applicationStatus }: Props) {
@@ -63,7 +77,7 @@ export default function JobStageStepper({ stages, currentStageIndex, application
                 return (
                     <div
                         key={stage.id || `${stage.name}-${idx}`}
-                        className="flex items-start gap-3 rounded-xl p-3 hover:bg-gray-50 transition-colors"
+                        className="flex items-start gap-3 rounded-xl border border-slate-100 p-3.5 transition-colors hover:border-slate-200 hover:bg-slate-50/60"
                         aria-label={`${stage.name}, ${statusLabel}`}
                         tabIndex={0}
                         data-testid="job-stage-step"
@@ -97,15 +111,52 @@ export default function JobStageStepper({ stages, currentStageIndex, application
                         </div>
 
                         <div className="min-w-0 flex-1">
-                            <p
-                                data-testid="job-stage-name"
-                                className={clsx('text-sm font-bold truncate', state === 'pending' ? 'text-gray-600' : 'text-gray-900')}
-                            >
-                                {stage.name}
-                            </p>
-                            <p data-testid="job-stage-status-line" className="text-xs text-gray-500 mt-1">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p
+                                    data-testid="job-stage-name"
+                                    className={clsx('text-sm font-bold truncate', state === 'pending' ? 'text-gray-600' : 'text-gray-900')}
+                                >
+                                    {stage.name}
+                                </p>
+                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
+                                    {Number(stage.stageCandidateCount || 0)} candidates
+                                </span>
+                            </div>
+                            <p data-testid="job-stage-status-line" className="mt-1 text-xs text-gray-500">
                                 {timestamp} - {statusLabel}
                             </p>
+                            {stage.notes ? (
+                                <p className="mt-1.5 text-xs leading-relaxed text-slate-600">{stage.notes}</p>
+                            ) : null}
+                            {(() => {
+                                const shortlistHref = stageDocHref(stage.shortlistDocPath);
+                                const attachmentHref = stageDocHref(stage.attachmentPath);
+                                if (!shortlistHref && !attachmentHref) return null;
+                                return (
+                                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                                        {shortlistHref && (
+                                            <a
+                                                href={shortlistHref}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center rounded-md border border-primary-200 bg-primary-50 px-2.5 py-1 text-[11px] font-semibold text-primary-800 hover:bg-primary-100"
+                                            >
+                                                {stage.shortlistDocTitle?.trim() || 'Shortlist PDF'}
+                                            </a>
+                                        )}
+                                        {attachmentHref && (
+                                            <a
+                                                href={attachmentHref}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                                            >
+                                                Stage attachment
+                                            </a>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                             {showOutcome && (
                                 <p className="text-xs font-semibold text-gray-700 mt-1">{outcomeNote}</p>
                             )}

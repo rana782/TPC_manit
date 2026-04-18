@@ -1,10 +1,8 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth.middleware';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 export const getStats = async (req: AuthRequest, res: Response) => {
     try {

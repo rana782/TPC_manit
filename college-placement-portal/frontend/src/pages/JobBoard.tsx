@@ -5,7 +5,8 @@ import { Link } from 'react-router-dom';
 import {
     Briefcase, Clock, IndianRupee, GraduationCap,
     CheckCircle2, XCircle, Users, AlertCircle, X, FileText, Sparkles,
-    Calendar, Building2, Lock, ArrowRight, Loader2, Zap, LayoutList, ChevronRight, Check
+    Calendar, Building2, Lock, ArrowRight, Loader2, Zap, LayoutList, ChevronRight, Check,
+    Search, MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
@@ -13,7 +14,6 @@ import PageHeader from '../components/layout/PageHeader';
 import StarRating from '../components/StarRating';
 import CompanySentimentSummary from '../components/CompanySentimentSummary';
 import { formatCompactReviewCount } from '../utils/formatCompactReviewCount';
-import { parseLookupRating, parseLookupReviews } from '../utils/parseCompanyLookup';
 import { getViteApiBase } from '../utils/apiBase';
 import { sanitizeJobMatchExplanation } from '../utils/atsDisplay';
 import AtsSuggestionsPanel from '../components/ats/AtsSuggestionsPanel';
@@ -94,7 +94,9 @@ function getCompanyProfile(companyProfiles: Record<string, CompanyProfileData>, 
 
 function getStatusCfg(status: string) {
     const s = status?.toUpperCase() || '';
-    if (s.includes('ACCEPT') || s === 'SELECTED') return { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Accepted' };
+    if (s.includes('PLACED') || s.includes('ACCEPT') || s.includes('OFFER') || s === 'SELECTED') {
+        return { icon: CheckCircle2, color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Placed' };
+    }
     if (s.includes('REJECT')) return { icon: XCircle, color: 'text-red-500', bg: 'bg-red-50', border: 'border-red-200', label: 'Rejected' };
     if (s.includes('WITHDRAWN')) return { icon: XCircle, color: 'text-gray-500', bg: 'bg-gray-100', border: 'border-gray-300', label: 'Withdrawn' };
     if (s.includes('SHORTLIST') || s.includes('INTERVIEW')) return { icon: Users, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', label: 'Shortlisted' };
@@ -105,6 +107,15 @@ function getStatusCfg(status: string) {
 function parseJsonField(val: any): any[] {
     if (Array.isArray(val)) return val;
     try { return JSON.parse(val); } catch { return []; }
+}
+
+function toFiniteNumberOrNull(value: unknown): number | null {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
 }
 
 export default function JobBoard() {
@@ -119,6 +130,7 @@ export default function JobBoard() {
     const [activeTab, setActiveTab] = useState<'jobs' | 'applications'>('jobs');
     const [isLocked, setIsLocked] = useState(false);
     const [lockedReason, setLockedReason] = useState('');
+    const [studentCgpa, setStudentCgpa] = useState<number | null>(null);
 
     // Apply modal & Stepper state
     const [applyingJob, setApplyingJob] = useState<Job | null>(null);
@@ -145,35 +157,27 @@ export default function JobBoard() {
     // Filter states
     const [selectedBranch, setSelectedBranch] = useState('');
     const [minCtc, setMinCtc] = useState<number | ''>('');
+    const [jobSearch, setJobSearch] = useState('');
     const [jobsFetchFailed, setJobsFetchFailed] = useState(false);
 
-    const fetchCompanyProfiles = async (companyNames: string[]) => {
-        const uniqueNames = [...new Set(companyNames.filter(Boolean))];
-        if (uniqueNames.length === 0) return;
-        const entries = await Promise.all(
-            uniqueNames.map(async (name) => {
-                try {
-                    const res = await axios.get(`${apiBase}/companies/lookup`, {
-                        params: { name },
-                        headers: { Authorization: `Bearer ${token}` },
-                        timeout: 4000
-                    });
-                    return [name, {
-                        rating: parseLookupRating(res.data?.rating),
-                        reviews: parseLookupReviews(res.data?.reviews),
-                        logoUrl: typeof res.data?.logoUrl === 'string' ? res.data.logoUrl : null,
-                        highlyRatedFor: Array.isArray(res.data?.highlyRatedFor) ? res.data.highlyRatedFor.map(String) : [],
-                        criticallyRatedFor: Array.isArray(res.data?.criticallyRatedFor) ? res.data.criticallyRatedFor.map(String) : [],
-                    }] as const;
-                } catch {
-                    return [name, { rating: null, reviews: null, logoUrl: null, highlyRatedFor: [], criticallyRatedFor: [] }] as const;
-                }
-            })
-        );
-        setCompanyProfiles(Object.fromEntries(entries));
+    const extractCompanyProfilesFromJobs = (jobRows: Array<Job & { companyProfile?: any }>) => {
+        const out: Record<string, CompanyProfileData> = {};
+        for (const j of jobRows) {
+            const key = typeof j.companyName === 'string' ? j.companyName : '';
+            if (!key) continue;
+            const p = j.companyProfile;
+            out[key] = {
+                rating: typeof p?.rating === 'number' ? p.rating : null,
+                reviews: typeof p?.reviews === 'number' ? p.reviews : null,
+                logoUrl: typeof p?.logoUrl === 'string' ? p.logoUrl : null,
+                highlyRatedFor: Array.isArray(p?.highlyRatedFor) ? p.highlyRatedFor.map(String) : [],
+                criticallyRatedFor: Array.isArray(p?.criticallyRatedFor) ? p.criticallyRatedFor.map(String) : [],
+            };
+        }
+        return out;
     };
 
-    const fetchAll = async () => {
+    const fetchAll = useCallback(async () => {
         try {
             setJobsFetchFailed(false);
             const [jobsRes, resumesRes, appsRes, profileRes] = await Promise.all([
@@ -201,9 +205,7 @@ export default function JobBoard() {
                         customQuestions: Array.isArray(j.customQuestions) ? j.customQuestions : (() => { try { return JSON.parse(j.customQuestions); } catch { return []; } })(),
                     }));
                 setJobs(parsed);
-                await Promise.all([
-                    fetchCompanyProfiles(parsed.map((j: Job) => j.companyName))
-                ]);
+                setCompanyProfiles(extractCompanyProfilesFromJobs(parsed));
             }
             const resumeSource = resumesRes.data.data || resumesRes.data.resumes || [];
             if (resumesRes.data.success) setResumes(resumeSource);
@@ -220,6 +222,7 @@ export default function JobBoard() {
             if (profileRes.data.success) {
                 setIsLocked(profileRes.data.data.isLocked);
                 setLockedReason(profileRes.data.data.lockedReason || '');
+                setStudentCgpa(toFiniteNumberOrNull(profileRes.data.data.cgpa));
             }
         } catch (err: any) {
             setJobsFetchFailed(true);
@@ -227,7 +230,7 @@ export default function JobBoard() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [apiBase, token]);
 
     useEffect(() => {
         if (authLoading) return;
@@ -246,11 +249,24 @@ export default function JobBoard() {
 
         if (user.role === 'STUDENT') {
             setError('');
-            fetchAll();
+            void fetchAll();
         } else {
             setLoading(false);
         }
-    }, [token, user, authLoading]);
+    }, [token, user, authLoading, fetchAll]);
+
+    useEffect(() => {
+        if (!token || user?.role !== 'STUDENT') return;
+        const intervalId = window.setInterval(() => { void fetchAll(); }, 15000);
+        const onVisibility = () => {
+            if (document.visibilityState === 'visible') void fetchAll();
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            window.clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, [token, user?.role, fetchAll]);
 
     /** Clear ATS preview when switching resume or job (user must click "ATS Match" again). */
     useEffect(() => {
@@ -373,11 +389,27 @@ export default function JobBoard() {
 
     const handleApplySubmit = async () => {
         setApplyError('');
-        if (!selectedResumeId) return;
+        if (!selectedResumeId || !applyingJob?.id) return;
 
         try {
+            const profileRes = await axios.get(`${apiBase}/student/profile`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const latestCgpa = toFiniteNumberOrNull(profileRes.data?.data?.cgpa);
+            setStudentCgpa(latestCgpa);
+            if ((applyingJob.cgpaMin || 0) > 0) {
+                if (latestCgpa == null) {
+                    setApplyError(`Your profile CGPA is missing. Please update your profile before applying (minimum required: ${applyingJob.cgpaMin}).`);
+                    return;
+                }
+                if (latestCgpa < applyingJob.cgpaMin) {
+                    setApplyError(`Your CGPA (${latestCgpa}) does not meet the minimum requirement of ${applyingJob.cgpaMin}.`);
+                    return;
+                }
+            }
+
             const res = await axios.post(`${apiBase}/applications`, {
-                jobId: applyingJob?.id,
+                jobId: applyingJob.id,
                 resumeId: selectedResumeId,
                 answers: customAnswers
             }, {
@@ -433,22 +465,25 @@ export default function JobBoard() {
     });
     const filteredJobs = branchFilteredJobs.filter((j) => !minCtc || (parseFloat(j.ctc || '0') >= minCtc));
 
-    const hasActiveFilters = Boolean(selectedBranch || minCtc !== '');
+    const visibleJobs = useMemo(() => {
+        const q = jobSearch.trim().toLowerCase();
+        if (!q) return filteredJobs;
+        return filteredJobs.filter((j) => {
+            const role = (j.role || '').toLowerCase();
+            const company = (j.companyName || '').toLowerCase();
+            const desc = (j.description || '').toLowerCase();
+            return role.includes(q) || company.includes(q) || desc.includes(q);
+        });
+    }, [filteredJobs, jobSearch]);
+
+    const hasActiveFilters = Boolean(selectedBranch || minCtc !== '' || jobSearch.trim());
     const noJobsReason = (() => {
         if (!jobsFetchFailed && jobs.length === 0) return 'NO_OPEN_PUBLISHED_JOBS';
         if (jobsFetchFailed) return 'API_ERROR';
-        if (hasActiveFilters && filteredJobs.length === 0) return 'FILTERED_OUT';
+        if ((selectedBranch || minCtc !== '') && filteredJobs.length === 0) return 'FILTERED_OUT';
+        if (filteredJobs.length > 0 && visibleJobs.length === 0 && jobSearch.trim()) return 'SEARCH_NO_MATCH';
         return 'NONE';
     })();
-    const jobsDiagnostics = {
-        totalFetchedJobs: jobs.length,
-        jobsAfterServerVisibility: jobs.length,
-        jobsAfterBranchFilter: branchFilteredJobs.length,
-        jobsAfterCtcFilter: filteredJobs.length,
-        selectedBranch: selectedBranch || 'Any',
-        minCtc: minCtc === '' ? 'Any' : String(minCtc),
-        lastFetchError: jobsFetchFailed
-    };
 
     // Stepper: Resume (with inline ATS) → [Questions?] → Review — no separate ATS step
     const hasQuestions = applyingJob?.customQuestions && applyingJob.customQuestions.length > 0;
@@ -496,14 +531,30 @@ export default function JobBoard() {
                         {/* Filters */}
                         {activeTab === 'jobs' && (
                             <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm space-y-5">
-                                <h3 className="text-base font-bold text-gray-900 border-b border-gray-100 pb-3">Filters</h3>
-                                
+                                <h3 className="text-sm font-bold text-gray-900 border-b border-gray-100 pb-3">Refine results</h3>
+
                                 <div className="space-y-4">
+                                    <div>
+                                        <label htmlFor="job-search" className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Search</label>
+                                        <div className="relative">
+                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" aria-hidden />
+                                            <input
+                                                id="job-search"
+                                                data-testid="job-search-input"
+                                                type="search"
+                                                placeholder="Role, company, keywords…"
+                                                value={jobSearch}
+                                                onChange={(e) => setJobSearch(e.target.value)}
+                                                className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-gray-200 text-sm bg-gray-50/80 focus:bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/15 focus:outline-none"
+                                            />
+                                        </div>
+                                    </div>
+
                                     <div>
                                         <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Branch</label>
                                         <select data-testid="branch-select" value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)}
-                                            className="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-sm bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none">
-                                            <option value="">All Branches</option>
+                                            className="w-full px-3 py-2.5 rounded-lg border border-gray-200 text-sm bg-white focus:border-primary-500 focus:ring-2 focus:ring-primary-500/15 focus:outline-none">
+                                            <option value="">All branches</option>
                                             <option value="CSE">CSE</option>
                                             <option value="ECE">ECE</option>
                                             <option value="MDS">MDS</option>
@@ -519,16 +570,19 @@ export default function JobBoard() {
                                         <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Min CTC (LPA)</label>
                                         <div className="relative">
                                             <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                                            <input data-testid="ctc-input" type="number" placeholder="e.g. 5"
+                                            <input data-testid="ctc-input" type="number" placeholder="e.g. 5" min={0}
                                                 value={minCtc} onChange={e => setMinCtc(e.target.value ? Number(e.target.value) : '')}
-                                                className="w-full pl-8 pr-3 py-2.5 rounded-lg border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none" />
+                                                className="w-full pl-8 pr-3 py-2.5 rounded-lg border border-gray-200 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/15 focus:outline-none" />
                                         </div>
                                     </div>
-                                    
-                                    {(selectedBranch || minCtc !== '') && (
-                                        <button onClick={() => { setSelectedBranch(''); setMinCtc(''); }}
-                                            className="w-full py-2 text-sm font-semibold text-primary-600 hover:bg-primary-50 rounded-lg transition-colors mt-2">
-                                            Clear Filters
+
+                                    {hasActiveFilters && (
+                                        <button
+                                            type="button"
+                                            onClick={() => { setSelectedBranch(''); setMinCtc(''); setJobSearch(''); }}
+                                            className="w-full py-2 text-sm font-semibold text-primary-700 hover:bg-primary-50 rounded-lg transition-colors border border-primary-100"
+                                        >
+                                            Clear all
                                         </button>
                                     )}
                                 </div>
@@ -572,175 +626,215 @@ export default function JobBoard() {
                         )}
 
                         {activeTab === 'jobs' && (
-                            <div className="space-y-5">
-                                <div className="flex items-center justify-between mb-2">
-                                    <h2 className="text-xl font-bold text-gray-900">Recommended Roles</h2>
-                                    <span className="text-sm text-gray-500 font-medium">{filteredJobs.length} results</span>
+                            <div className="space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+                                    <div>
+                                        <h2 className="text-lg sm:text-xl font-bold text-gray-900 tracking-tight">Open positions</h2>
+                                        <p className="text-sm text-gray-500 mt-0.5">
+                                            {jobSearch.trim()
+                                                ? `${visibleJobs.length} match${visibleJobs.length === 1 ? '' : 'es'} · ${filteredJobs.length} in current filter`
+                                                : `${visibleJobs.length} role${visibleJobs.length === 1 ? '' : 's'} shown`}
+                                        </p>
+                                    </div>
                                 </div>
-                                
-                                {filteredJobs.length === 0 ? (
-                                    <div className="bg-white rounded-2xl border border-dashed border-gray-300 py-20 text-center shadow-sm">
-                                        <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                                            <Briefcase className="w-8 h-8 text-gray-400" />
+
+                                {visibleJobs.length === 0 ? (
+                                    <div className="bg-white rounded-xl border border-dashed border-gray-200 py-16 sm:py-20 text-center shadow-sm">
+                                        <div className="w-14 h-14 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                                            <Briefcase className="w-7 h-7 text-gray-400" />
                                         </div>
-                                        <h3 className="text-lg font-bold text-gray-900 mb-2">No roles found</h3>
-                                        <p className="text-sm text-gray-500 max-w-sm mx-auto">
-                                            {noJobsReason === 'FILTERED_OUT' && 'No jobs match your current filters. Try resetting branch/CTC filters.'}
+                                        <h3 className="text-base font-bold text-gray-900 mb-2">No roles found</h3>
+                                        <p className="text-sm text-gray-500 max-w-md mx-auto px-4">
+                                            {noJobsReason === 'FILTERED_OUT' && 'No jobs match your branch or minimum CTC. Try widening those filters.'}
+                                            {noJobsReason === 'SEARCH_NO_MATCH' && 'No jobs match your search. Try different keywords or clear the search box.'}
                                             {noJobsReason === 'NO_OPEN_PUBLISHED_JOBS' && 'No currently open published jobs are available right now. Check back soon.'}
                                             {noJobsReason === 'API_ERROR' && 'Could not load jobs from server. Please refresh the page and try again.'}
                                             {noJobsReason === 'NONE' && 'Try adjusting your filters or check back later for new opportunities.'}
                                         </p>
                                         {hasActiveFilters && (
                                             <button
-                                                onClick={() => { setSelectedBranch(''); setMinCtc(''); }}
-                                                className="mt-4 px-4 py-2 rounded-lg text-sm font-semibold text-primary-700 bg-primary-50 border border-primary-200 hover:bg-primary-100 transition-colors"
+                                                type="button"
+                                                onClick={() => { setSelectedBranch(''); setMinCtc(''); setJobSearch(''); }}
+                                                className="mt-5 px-4 py-2 rounded-lg text-sm font-semibold text-primary-800 bg-primary-50 border border-primary-100 hover:bg-primary-100 transition-colors"
                                             >
-                                                Reset Filters
+                                                Reset filters
                                             </button>
                                         )}
-                                        <div className="mt-5 mx-auto max-w-md rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-left">
-                                            <p className="text-xs font-semibold text-gray-600">
-                                                Fetched: {jobsDiagnostics.totalFetchedJobs} | Visible: {jobsDiagnostics.jobsAfterServerVisibility} | After Branch: {jobsDiagnostics.jobsAfterBranchFilter} | After CTC: {jobsDiagnostics.jobsAfterCtcFilter}
-                                            </p>
-                                            <p className="text-xs text-gray-500 mt-1">
-                                                Branch: {jobsDiagnostics.selectedBranch}, Min CTC: {jobsDiagnostics.minCtc}, API Error: {jobsDiagnostics.lastFetchError ? 'Yes' : 'No'}
-                                            </p>
-                                        </div>
                                     </div>
                                 ) : (
-                                    <div className="space-y-4">
-                                        {filteredJobs.map((job, i) => {
+                                    <ul className="space-y-3 list-none p-0 m-0">
+                                        {visibleJobs.map((job) => {
                                             const branches = parseJsonField(job.eligibleBranches);
                                             const reqFields = parseJsonField(job.requiredProfileFields);
                                             const isExpired = new Date() > new Date(job.applicationDeadline);
                                             const activeApplication = activeApplicationByJobId.get(job.id);
                                             const isApplied = appliedJobIds.has(job.id);
+                                            const activeStatus = String(activeApplication?.status || '').toUpperCase();
+                                            const isPlacedForThisJob =
+                                                activeStatus.includes('PLACED') ||
+                                                activeStatus.includes('ACCEPT') ||
+                                                activeStatus.includes('OFFER') ||
+                                                activeStatus === 'SELECTED';
                                             const canWithdraw = !!activeApplication && !isExpired && String(activeApplication.status || '').toUpperCase() === 'APPLIED';
                                             const prof = getCompanyProfile(companyProfiles, job.companyName);
                                             const positiveFeatures = prof.highlyRatedFor.filter((s): s is string => typeof s === 'string' && !!s.trim());
                                             const negativeFeatures = prof.criticallyRatedFor.filter((s): s is string => typeof s === 'string' && !!s.trim());
+                                            const withdrawing = canWithdraw && activeApplication && withdrawingApplicationId === activeApplication.id;
 
                                             return (
-                                                <motion.div key={job.id} data-testid="job-card"
-                                                    initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-                                                    className="bg-white rounded-2xl border border-gray-200 overflow-visible hover:shadow-lg hover:border-primary-200 transition-all duration-300 group">
-                                                    
-                                                    <div className="p-6">
-                                                        <div className="flex flex-col sm:flex-row sm:items-start gap-5">
-                                                            <div className="w-16 h-16 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0 self-start group-hover:bg-primary-50 group-hover:border-primary-100 transition-colors">
-                                                                    <img
-                                                                        src={getCompanyProfile(companyProfiles, job.companyName).logoUrl || '/default-logo.png'}
-                                                                        onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/default-logo.png'; }}
-                                                                        alt={`${job.companyName} logo`}
-                                                                        className="w-10 h-10 object-contain"
-                                                                    />
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-2">
-                                                                    <div>
-                                                                        <h3 className="text-xl font-bold text-gray-900 mb-1 group-hover:text-primary-700 transition-colors">{job.role}</h3>
-                                                                        <p className="text-base text-gray-600 font-medium flex items-center gap-2">
-                                                                            {job.companyName}
-                                                                            <span className="w-1 h-1 rounded-full bg-gray-300"></span>
-                                                                            <span className="text-gray-500 text-sm">{job.jobType || 'Full-Time'}</span>
-                                                                        </p>
-                                                                        <div className="text-xs font-semibold text-gray-500 mt-1">
-                                                                            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                                                                            {typeof prof.rating === 'number' ? (
-                                                                                <>
-                                                                                    <StarRating rating={prof.rating} />
-                                                                                    <span className={ratingColorClass(prof.rating)}>{prof.rating.toFixed(1)}/5</span>
-                                                                                    {typeof prof.reviews === 'number' && (
-                                                                                        <span className="text-gray-500 whitespace-nowrap">({formatCompactReviewCount(prof.reviews)} reviews)</span>
-                                                                                    )}
-                                                                                </>
-                                                                            ) : (
-                                                                                <span>Rating not available</span>
-                                                                            )}
+                                                <li key={job.id} data-testid="job-card">
+                                                    <div className="bg-white rounded-xl border border-gray-200/90 shadow-sm hover:border-primary-200/80 hover:shadow-md transition-shadow duration-200">
+                                                        <div className="p-4 sm:p-5">
+                                                            <div className="flex flex-col lg:flex-row lg:items-stretch gap-4 lg:gap-6">
+                                                                <div className="flex gap-3 sm:gap-4 flex-1 min-w-0">
+                                                                    <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center flex-shrink-0">
+                                                                        <img
+                                                                            src={prof.logoUrl || '/default-logo.png'}
+                                                                            onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/default-logo.png'; }}
+                                                                            alt=""
+                                                                            className="w-8 h-8 sm:w-9 sm:h-9 object-contain"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0 space-y-3">
+                                                                        <div>
+                                                                            <h3 className="text-base sm:text-lg font-bold text-gray-900 leading-snug">{job.role}</h3>
+                                                                            <p className="text-sm text-gray-600 mt-0.5">
+                                                                                <span className="font-medium text-gray-800">{job.companyName}</span>
+                                                                                <span className="text-gray-300 mx-1.5">·</span>
+                                                                                <span className="text-gray-500">{job.jobType || 'Full-time'}</span>
+                                                                            </p>
+                                                                            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600">
+                                                                                {typeof prof.rating === 'number' ? (
+                                                                                    <>
+                                                                                        <span className="inline-flex items-center gap-1">
+                                                                                            <StarRating rating={prof.rating} />
+                                                                                            <span className={clsx('font-semibold tabular-nums', ratingColorClass(prof.rating))}>
+                                                                                                {prof.rating.toFixed(1)}
+                                                                                            </span>
+                                                                                            <span className="text-gray-400 font-medium">/ 5</span>
+                                                                                        </span>
+                                                                                        {typeof prof.reviews === 'number' && (
+                                                                                            <span className="text-gray-500">
+                                                                                                ({formatCompactReviewCount(prof.reviews)} reviews)
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <span className="text-gray-400">Company rating not available</span>
+                                                                                )}
                                                                             </div>
                                                                             <CompanySentimentSummary
                                                                                 positiveFeatures={positiveFeatures}
                                                                                 negativeFeatures={negativeFeatures}
+                                                                                compact
                                                                             />
                                                                         </div>
+
+                                                                        <div className="flex flex-wrap gap-2">
+                                                                            {job.ctc ? (
+                                                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-100/80">
+                                                                                    <IndianRupee className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                                                                    {job.ctc} LPA
+                                                                                </span>
+                                                                            ) : null}
+                                                                            {job.cgpaMin > 0 ? (
+                                                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-100/80">
+                                                                                    <GraduationCap className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                                                                    {job.cgpaMin}+ CGPA
+                                                                                </span>
+                                                                            ) : null}
+                                                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-50 text-slate-700 border border-slate-200/80">
+                                                                                <Clock className="w-3.5 h-3.5 shrink-0 text-slate-500" aria-hidden />
+                                                                                Apply by {new Date(job.applicationDeadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                                                            </span>
+                                                                        </div>
+
+                                                                        <div className="flex flex-wrap gap-1.5">
+                                                                            {branches.slice(0, 5).map((b: string, bi: number) => (
+                                                                                <span key={bi} className="px-2 py-0.5 rounded text-[11px] font-semibold bg-primary-50/90 text-primary-800 border border-primary-100">{b}</span>
+                                                                            ))}
+                                                                            {reqFields.slice(0, 2).map((f: string, fi: number) => (
+                                                                                <span key={fi} className="px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600 border border-gray-200/80">{f}</span>
+                                                                            ))}
+                                                                            {(branches.length > 5 || reqFields.length > 2) && (
+                                                                                <span className="px-2 py-0.5 text-[11px] text-gray-400 font-medium">
+                                                                                    +{Math.max(0, branches.length - 5) + Math.max(0, reqFields.length - 2)} more
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
-                                                                    <div className="flex-shrink-0 mt-2 sm:mt-0 relative">
-                                                                        {isApplied ? (
-                                                                            canWithdraw && activeApplication ? (
+                                                                </div>
+
+                                                                <div className="flex flex-row sm:flex-row lg:flex-col gap-2 lg:w-44 flex-shrink-0 lg:justify-center border-t lg:border-t-0 lg:border-l border-gray-100 pt-3 lg:pt-0 lg:pl-6">
+                                                                    {isApplied ? (
+                                                                        isPlacedForThisJob ? (
+                                                                            <span className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+                                                                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                                                                Placed
+                                                                            </span>
+                                                                        ) : canWithdraw && activeApplication ? (
+                                                                            <>
+                                                                                <span className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-100 lg:order-1">
+                                                                                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                                                                    Applied
+                                                                                </span>
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => handleWithdrawApplication(activeApplication.id)}
-                                                                                    disabled={withdrawingApplicationId === activeApplication.id}
-                                                                                    className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-red-50 text-red-700 border border-red-200 shadow-sm w-full sm:w-auto disabled:opacity-60"
+                                                                                    disabled={withdrawing}
+                                                                                    aria-busy={withdrawing}
+                                                                                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-red-700 bg-white border border-red-200 hover:bg-red-50 disabled:opacity-60 disabled:pointer-events-none lg:order-2"
                                                                                 >
-                                                                                    <XCircle className="w-4 h-4" />
-                                                                                    {withdrawingApplicationId === activeApplication.id ? 'Withdrawing...' : 'Withdraw Application'}
+                                                                                    <XCircle className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                                                                    {withdrawing ? 'Withdrawing…' : 'Withdraw application'}
                                                                                 </button>
-                                                                            ) : (
-                                                                                <span className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm w-full sm:w-auto">
-                                                                                    <CheckCircle2 className="w-4 h-4" />Applied
-                                                                                </span>
-                                                                            )
-                                                                        ) : isExpired ? (
-                                                                            <span className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-red-50 text-red-600 border border-red-200 shadow-sm w-full sm:w-auto">
-                                                                                <XCircle className="w-4 h-4" />Closed
-                                                                            </span>
-                                                                        ) : isLocked ? (
-                                                                            <button disabled className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-gray-100 text-gray-500 border border-gray-200 shadow-sm w-full sm:w-auto opacity-50 cursor-not-allowed">
-                                                                                <Lock className="w-4 h-4" />Already Placed
-                                                                            </button>
+                                                                            </>
                                                                         ) : (
-                                                                            <button onClick={() => handleApplyClick(job)}
-                                                                                className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-primary-600 text-white hover:bg-primary-700 transition-all shadow-sm hover:shadow-primary-500/25 w-full sm:w-auto transform active:scale-95">
-                                                                                <Zap className="w-4 h-4" />Apply Now
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-
-                                                                <div className="flex flex-wrap items-center gap-3 mt-4">
-                                                                    {job.ctc && (
-                                                                        <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-lg">
-                                                                            <IndianRupee className="w-4 h-4 text-emerald-600" />
-                                                                            <span className="text-sm font-bold text-gray-900">{job.ctc} LPA</span>
-                                                                        </div>
+                                                                            <span className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-100">
+                                                                                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                                                                Applied
+                                                                            </span>
+                                                                        )
+                                                                    ) : isExpired ? (
+                                                                        <span className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-gray-100 text-gray-600 border border-gray-200">
+                                                                            <XCircle className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                                                            Closed
+                                                                        </span>
+                                                                    ) : isLocked ? (
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled
+                                                                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-80"
+                                                                        >
+                                                                            <Lock className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                                                            Already placed
+                                                                        </button>
+                                                                    ) : (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleApplyClick(job)}
+                                                                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold bg-primary-600 text-white hover:bg-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 shadow-sm"
+                                                                        >
+                                                                            <Zap className="w-4 h-4 shrink-0" aria-hidden />
+                                                                            Apply now
+                                                                        </button>
                                                                     )}
-                                                                    {job.cgpaMin > 0 && (
-                                                                        <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-lg">
-                                                                            <GraduationCap className="w-4 h-4 text-amber-600" />
-                                                                            <span className="text-sm font-bold text-gray-900">{job.cgpaMin}+ CGPA</span>
-                                                                        </div>
-                                                                    )}
-                                                                    <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-lg">
-                                                                        <Clock className="w-4 h-4 text-blue-600" />
-                                                                        <span className="text-sm font-bold text-gray-900">Deadline: {new Date(job.applicationDeadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
-                                                                    </div>
-                                                                </div>
-
-                                                                <div className="mt-5 pt-5 border-t border-gray-100 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-                                                                    <div className="flex flex-wrap gap-2">
-                                                                        {branches.slice(0, 4).map((b: string, bi: number) => (
-                                                                            <span key={bi} className="px-2.5 py-1 rounded-md text-xs font-semibold bg-primary-50 text-primary-700 border border-primary-100/50">{b}</span>
-                                                                        ))}
-                                                                        {reqFields.slice(0, 2).map((f: string, fi: number) => (
-                                                                            <span key={fi} className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-200">{f}</span>
-                                                                        ))}
-                                                                        {(branches.length > 4 || reqFields.length > 2) && (
-                                                                            <span className="px-2.5 py-1 rounded-md text-xs font-medium text-gray-500">+{Math.max(0, branches.length - 4) + Math.max(0, reqFields.length - 2)} more</span>
-                                                                        )}
-                                                                    </div>
-                                                                    
-                                                                    <button onClick={() => openJobDetails(job.id)} className="text-sm font-bold text-primary-600 hover:text-primary-700 flex items-center gap-1">
-                                                                        View Details <ArrowRight className="w-4 h-4" />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => openJobDetails(job.id)}
+                                                                        className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold text-primary-700 bg-primary-50/50 border border-primary-100 hover:bg-primary-50"
+                                                                    >
+                                                                        View details
+                                                                        <ArrowRight className="w-3.5 h-3.5 shrink-0" aria-hidden />
                                                                     </button>
                                                                 </div>
                                                             </div>
                                                         </div>
                                                     </div>
-                                                </motion.div>
+                                                </li>
                                             );
                                         })}
-                                    </div>
+                                    </ul>
                                 )}
                             </div>
                         )}
@@ -761,7 +855,7 @@ export default function JobBoard() {
                                     </div>
                                 ) : (
                                     <div className="space-y-4">
-                                        {myApplications.map((app, i) => {
+                                        {myApplications.map((app) => {
                                             const cfg = getStatusCfg(app.status);
                                             const keywords = parseJsonField(app.atsMatchedKeywords);
                                             const matchedSkills = parseJsonField(app.skillsMatched);
@@ -769,8 +863,7 @@ export default function JobBoard() {
                                             const suggestions = parseJsonField(app.suggestions);
                                             const atsExplanationClean = sanitizeJobMatchExplanation(String(app.atsExplanation || ''));
                                             return (
-                                                <motion.div key={app.id}
-                                                    initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+                                                <div key={app.id}
                                                     className={clsx('bg-white rounded-2xl border shadow-sm overflow-hidden relative', cfg.border)}>
                                                     
                                                     {/* Status accent edge */}
@@ -889,7 +982,7 @@ export default function JobBoard() {
                                                             )}
                                                         </div>
                                                     </div>
-                                                </motion.div>
+                                                </div>
                                             );
                                         })}
                                     </div>
@@ -1211,6 +1304,12 @@ export default function JobBoard() {
                                                             <span className="text-sm font-bold text-gray-900">{resumes.find(r => r.id === selectedResumeId)?.fileName || 'None'}</span>
                                                         </div>
                                                         <div className="flex items-center justify-between">
+                                                            <span className="text-sm font-bold text-gray-500">Your CGPA</span>
+                                                            <span className="text-sm font-bold text-gray-900">
+                                                                {studentCgpa == null ? 'Not set' : studentCgpa}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-center justify-between">
                                                             <span className="text-sm font-bold text-gray-500">ATS Match Prediction</span>
                                                             <span className="text-sm font-bold text-gray-900">{jobMatchScore?.matchScore ?? jobMatchScore?.score ?? 'N/A'}/100</span>
                                                         </div>
@@ -1273,106 +1372,168 @@ export default function JobBoard() {
                             onClick={(e) => e.stopPropagation()}
                             data-testid="job-details-modal"
                         >
-                            <div className="flex items-start justify-between gap-4 px-6 py-5 border-b border-gray-100">
-                                <div className="min-w-0">
-                                    <p className="text-sm font-semibold text-gray-500 truncate">Company</p>
-                                    <h2 className="text-2xl font-extrabold text-gray-900 truncate">
-                                        {jobDetails?.companyName || '—'}
-                                    </h2>
+                            <div className="bg-gradient-to-b from-slate-50 to-white border-b border-gray-100 px-5 sm:px-8 py-6">
+                                <div className="flex items-start justify-between gap-4">
+                                    <div className="flex gap-4 min-w-0">
+                                        <div className="w-14 h-14 rounded-xl bg-white border border-gray-200 flex items-center justify-center flex-shrink-0 shadow-sm">
+                                            {jobDetailsLoading ? (
+                                                <Building2 className="w-7 h-7 text-gray-300" aria-hidden />
+                                            ) : (
+                                                <img
+                                                    src={getCompanyProfile(companyProfiles, jobDetails?.companyName || '').logoUrl || '/default-logo.png'}
+                                                    onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/default-logo.png'; }}
+                                                    alt=""
+                                                    className="w-9 h-9 object-contain"
+                                                />
+                                            )}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Role overview</p>
+                                            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 leading-tight mt-0.5 truncate">
+                                                {jobDetails?.role || (jobDetailsLoading ? 'Loading…' : '—')}
+                                            </h2>
+                                            <p className="text-sm font-medium text-gray-600 mt-1 truncate">
+                                                {jobDetails?.companyName || '—'}
+                                            </p>
+                                            {!jobDetailsLoading && jobDetails && (
+                                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                                                    {typeof getCompanyProfile(companyProfiles, jobDetails.companyName).rating === 'number' ? (
+                                                        <span className="inline-flex items-center gap-1 font-medium text-gray-800">
+                                                            <StarRating rating={getCompanyProfile(companyProfiles, jobDetails.companyName).rating!} />
+                                                            <span className={ratingColorClass(getCompanyProfile(companyProfiles, jobDetails.companyName).rating!)}>
+                                                                {getCompanyProfile(companyProfiles, jobDetails.companyName).rating!.toFixed(1)} / 5
+                                                            </span>
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-400">Rating not available</span>
+                                                    )}
+                                                    <span className="text-gray-300 hidden sm:inline">|</span>
+                                                    <span className="inline-flex items-center gap-1 text-gray-600">
+                                                        <Briefcase className="w-3.5 h-3.5 text-gray-400" aria-hidden />
+                                                        {jobDetails.jobType || 'Full-time'}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setJobDetailsModalOpen(false)}
+                                        className="p-2 rounded-lg bg-white border border-gray-200 hover:bg-gray-50 text-gray-500 transition-colors flex-shrink-0"
+                                        aria-label="Close job details"
+                                    >
+                                        <X className="w-5 h-5" />
+                                    </button>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setJobDetailsModalOpen(false)}
-                                    className="p-2 rounded-full bg-white border border-gray-200 hover:bg-gray-100 text-gray-500 transition-colors flex-shrink-0"
-                                    aria-label="Close job details"
-                                >
-                                    <X className="w-5 h-5" />
-                                </button>
                             </div>
 
-                            <div className="px-6 py-5">
+                            <div className="px-5 sm:px-8 py-6 max-h-[min(72vh,640px)] overflow-y-auto">
                                 {jobDetailsLoading ? (
                                     <div className="flex items-center justify-center py-16">
                                         <div className="w-7 h-7 border-2 border-primary-600 border-t-transparent rounded-full animate-spin" />
                                     </div>
                                 ) : (
-                                    jobDetails && (
-                                        <div className="space-y-6">
-                                            <div className="space-y-2">
-                                                <p className="text-sm font-semibold text-gray-500">Job Title</p>
-                                                <p className="text-xl font-bold text-gray-900">{jobDetails.role}</p>
-                                            </div>
-
-                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                                <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
-                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Package</p>
-                                                    <p className="text-sm font-bold text-gray-900">{jobDetails.ctc ? `${jobDetails.ctc} LPA` : 'Not specified'}</p>
-                                                </div>
-                                                <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 sm:col-span-2">
-                                                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Location</p>
-                                                    <p className="text-sm font-bold text-gray-900">{jobDetails.location || 'Not specified'}</p>
-                                                </div>
-                                            </div>
-
-                                            <div className="space-y-3">
-                                                <p className="text-sm font-semibold text-gray-900">Eligibility</p>
-                                                <div className="flex flex-wrap gap-2">
-                                                    <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700">
-                                                        Branch: {jobDetails.eligibleBranches?.length ? jobDetails.eligibleBranches.join(', ') : 'Any'}
-                                                    </span>
-                                                    <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700">
-                                                        Minimum CGPA: {jobDetails.cgpaMin || 0}
-                                                    </span>
-                                                    {jobDetails.requiredProfileFields?.length ? (
-                                                        <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700">
-                                                            Required fields: {jobDetails.requiredProfileFields.slice(0, 3).join(', ')}
-                                                            {jobDetails.requiredProfileFields.length > 3 ? ` +${jobDetails.requiredProfileFields.length - 3}` : ''}
-                                                        </span>
-                                                    ) : null}
-                                                </div>
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <p className="text-sm font-semibold text-gray-900">Job Description</p>
-                                                <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">
-                                                    {jobDetails.description || 'No description provided for this role.'}
-                                                </p>
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <p className="text-sm font-semibold text-gray-900">Timeline</p>
-                                                {jobDetails.stages && jobDetails.stages.length > 0 ? (
-                                                    <div className="space-y-3">
-                                                        {jobDetails.stages.map((stage) => (
-                                                            <div key={stage.id} className="flex items-start gap-3">
-                                                                <div className="w-2.5 h-2.5 rounded-full bg-primary-500 mt-2 flex-shrink-0" />
-                                                                <div>
-                                                                    <p className="text-sm font-bold text-gray-900">{stage.name}</p>
-                                                                    <p className="text-xs text-gray-500">
-                                                                        {stage.scheduledDate
-                                                                            ? new Date(stage.scheduledDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-                                                                            : 'TBD'}
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-                                                        ))}
+                                    jobDetails && (() => {
+                                        const eb = Array.isArray(jobDetails.eligibleBranches)
+                                            ? jobDetails.eligibleBranches
+                                            : parseJsonField(jobDetails.eligibleBranches as unknown);
+                                        const req = Array.isArray(jobDetails.requiredProfileFields)
+                                            ? jobDetails.requiredProfileFields
+                                            : parseJsonField(jobDetails.requiredProfileFields as unknown);
+                                        return (
+                                            <div className="space-y-8">
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                    <div className="rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+                                                        <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Compensation</p>
+                                                        <p className="text-sm font-semibold text-gray-900">{jobDetails.ctc ? `${jobDetails.ctc} LPA` : 'Not specified'}</p>
                                                     </div>
-                                                ) : (
-                                                    <p className="text-sm text-gray-500">Timeline not available</p>
-                                                )}
-                                            </div>
+                                                    <div className="rounded-xl border border-gray-100 bg-gray-50/80 p-4">
+                                                        <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Apply by</p>
+                                                        <p className="text-sm font-semibold text-gray-900">
+                                                            {new Date(jobDetails.applicationDeadline).toLocaleDateString('en-IN', {
+                                                                day: 'numeric',
+                                                                month: 'short',
+                                                                year: 'numeric',
+                                                            })}
+                                                        </p>
+                                                    </div>
+                                                    <div className="rounded-xl border border-gray-100 bg-gray-50/80 p-4 sm:col-span-2">
+                                                        <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1 flex items-center gap-1">
+                                                            <MapPin className="w-3.5 h-3.5" aria-hidden />
+                                                            Location
+                                                        </p>
+                                                        <p className="text-sm font-semibold text-gray-900">{jobDetails.location || 'Not specified'}</p>
+                                                    </div>
+                                                </div>
 
-                                            <div className="space-y-2">
-                                                <p className="text-sm font-semibold text-gray-900">Applicants</p>
-                                                <p className="text-lg font-bold text-gray-900">
-                                                    Applied by {jobApplicantsCount} students
-                                                </p>
+                                                <section className="space-y-2">
+                                                    <h3 className="text-sm font-bold text-gray-900">Eligibility</h3>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <span className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-200 text-gray-800">
+                                                            {eb.length ? eb.join(', ') : 'Any branch'}
+                                                        </span>
+                                                        <span className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-200 text-gray-800">
+                                                            Min. CGPA {jobDetails.cgpaMin || 0}
+                                                        </span>
+                                                        {req.length > 0 && (
+                                                            <span className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-200 text-gray-800">
+                                                                Profile: {req.slice(0, 4).join(', ')}
+                                                                {req.length > 4 ? ` +${req.length - 4}` : ''}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </section>
+
+                                                <section className="space-y-2">
+                                                    <h3 className="text-sm font-bold text-gray-900">About the role</h3>
+                                                    <div className="rounded-xl border border-gray-100 bg-white p-4 sm:p-5">
+                                                        <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">
+                                                            {jobDetails.description || 'No description provided for this role.'}
+                                                        </p>
+                                                    </div>
+                                                </section>
+
+                                                <section className="space-y-3">
+                                                    <h3 className="text-sm font-bold text-gray-900">Selection timeline</h3>
+                                                    {jobDetails.stages && jobDetails.stages.length > 0 ? (
+                                                        <ol className="space-y-0 border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-100 bg-white">
+                                                            {jobDetails.stages.map((stage, idx) => (
+                                                                <li key={stage.id} className="flex gap-3 px-4 py-3.5">
+                                                                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xs font-bold text-primary-800 border border-primary-100">
+                                                                        {idx + 1}
+                                                                    </span>
+                                                                    <div className="min-w-0">
+                                                                        <p className="text-sm font-semibold text-gray-900">{stage.name}</p>
+                                                                        <p className="text-xs text-gray-500 mt-0.5">
+                                                                            {stage.scheduledDate
+                                                                                ? new Date(stage.scheduledDate).toLocaleDateString('en-IN', {
+                                                                                    day: 'numeric',
+                                                                                    month: 'short',
+                                                                                    year: 'numeric',
+                                                                                })
+                                                                                : 'TBD'}
+                                                                        </p>
+                                                                    </div>
+                                                                </li>
+                                                            ))}
+                                                        </ol>
+                                                    ) : (
+                                                        <p className="text-sm text-gray-500">Timeline not available</p>
+                                                    )}
+                                                </section>
+
+                                                <div className="rounded-xl border border-primary-100 bg-primary-50/40 px-4 py-3.5">
+                                                    <p className="text-xs font-semibold text-primary-800 uppercase tracking-wide">Applicants</p>
+                                                    <p className="text-base font-bold text-gray-900 mt-1">
+                                                        Applied by {jobApplicantsCount} students
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 mt-1">Submit from the job card when you are ready to apply.</p>
+                                                </div>
                                             </div>
-                                        </div>
-                                    )
+                                        );
+                                    })()
                                 )}
 
-                                {/* Error must be shown below the modal content block */}
                                 {!jobDetailsLoading && jobDetailsError && (
                                     <div
                                         data-testid="job-details-error"

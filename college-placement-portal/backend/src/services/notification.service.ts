@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 const normalizePhoneFromDb = (rawPhone: string | null | undefined): string => {
     const cleaned = String(rawPhone || '')
@@ -190,9 +188,27 @@ export const sendPlacementResultEmailWebhook = async (input: PlacementEmailWebho
     const subject =
         input.subject?.trim() ||
         `Placement Result: ${input.companyName} - ${input.role}`;
-    const messageText =
+    const defaultMessageText = `We're thrilled to share this, ${input.studentName}! 🎉 Congratulations on being placed at ${input.companyName} as ${input.role}. With a CTC of ${input.ctc || 'N/A'}, this achievement reflects your dedication and talent. Please send your acceptance at tpwnitb@gmail.com.`;
+    let messageText =
         input.messageText?.trim() ||
-        `We're thrilled to share this, ${input.studentName}! 🎉 Congratulations on being placed at ${input.companyName} as ${input.role}. With a CTC of ${input.ctc || 'N/A'}, this achievement reflects your dedication and talent. Please send your acceptance at tpwnitb@gmail.com.`;
+        defaultMessageText;
+    if (!input.messageText?.trim()) {
+        try {
+            const t = await prisma.systemSetting.findUnique({ where: { key: 'PLACEMENT_EMAIL_TEMPLATE' } });
+            const configuredTemplate = String(t?.value || '').trim();
+            if (configuredTemplate) {
+                messageText = configuredTemplate
+                    .replace(/\{student_name\}/g, input.studentName)
+                    .replace(/\{company_name\}/g, input.companyName)
+                    .replace(/\{role\}/g, input.role)
+                    .replace(/\{ctc\}/g, input.ctc || 'N/A')
+                    .replace(/\{status\}/g, statusValue)
+                    .replace(/\{placement_year\}/g, String(placementYear));
+            }
+        } catch {
+            // Fallback to hardcoded message when system setting is unavailable.
+        }
+    }
     const messageHtml =
         input.messageHtml?.trim() ||
         `<p>We're thrilled to share this, ${input.studentName}! 🎉 Congratulations on being placed at <b>${input.companyName}</b> as <b>${input.role}</b>. With a CTC of <b>${input.ctc || 'N/A'}</b>, this achievement reflects your dedication and talent.</p><p>Please send your acceptance at <b>tpwnitb@gmail.com</b>.</p><p>Placement Year: <b>${placementYear}</b></p>`;

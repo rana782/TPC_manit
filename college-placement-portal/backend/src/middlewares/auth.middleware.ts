@@ -1,9 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
-const prisma = new PrismaClient();
 
 export interface AuthRequest extends Request {
     user?: {

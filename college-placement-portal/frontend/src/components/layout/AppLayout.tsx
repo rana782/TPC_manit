@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { clsx } from 'clsx';
 import { useAuth } from '../../context/AuthContext';
 import Sidebar from './Sidebar';
 import Navbar from './Navbar';
@@ -12,10 +12,10 @@ export default function AppLayout() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-surface-bg">
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
                 <div className="flex flex-col items-center gap-3">
-                    <div className="w-8 h-8 border-3 border-primary-600 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-sm text-gray-500">Loading...</p>
+                    <div className="h-9 w-9 rounded-full border-2 border-primary-600 border-t-transparent animate-spin" />
+                    <p className="text-sm font-medium text-slate-500">Loading...</p>
                 </div>
             </div>
         );
@@ -35,45 +35,42 @@ export default function AppLayout() {
 
     if (isSpocApprovalPending) {
         return (
-            <div className="min-h-screen bg-white flex items-center justify-center">
-                <p className="text-xl font-semibold text-gray-700">Approval pending from the coordinator.</p>
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center px-6">
+                <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+                    <p className="font-display text-xl font-semibold text-slate-900">Approval pending</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                        Your SPOC account is awaiting verification from the placement coordinator.
+                    </p>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-surface-bg flex">
-            {/* Sidebar */}
+        <div className="min-h-screen flex overflow-hidden bg-slate-50 text-slate-900">
             <Sidebar
                 collapsed={sidebarCollapsed}
-                onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+                onToggle={() => setSidebarCollapsed((c) => !c)}
                 mobileOpen={mobileOpen}
                 onMobileClose={() => setMobileOpen(false)}
             />
 
-            {/* Main area */}
-            <motion.div
-                initial={false}
-                animate={{
-                    marginLeft: typeof window !== 'undefined' && window.innerWidth >= 1024
-                        ? sidebarCollapsed ? 72 : 260
-                        : 0
-                }}
-                transition={{ duration: 0.2, ease: 'easeInOut' }}
-                className="flex-1 flex flex-col min-h-screen lg:ml-[260px]"
+            <div
+                className={clsx(
+                    'flex flex-1 flex-col min-h-0 min-w-0 transition-[margin] duration-200 ease-out',
+                    sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64'
+                )}
             >
-                {/* Navbar */}
                 <Navbar
                     onMenuClick={() => setMobileOpen(true)}
                     sidebarCollapsed={sidebarCollapsed}
-                    onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+                    onSidebarToggle={() => setSidebarCollapsed((c) => !c)}
                 />
 
-                {/* Page content */}
-                <main className="flex-1 overflow-y-auto p-6 lg:p-8">
+                <main className="flex-1 min-h-0 overflow-y-auto bg-slate-50 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
                     <Outlet />
                 </main>
-            </motion.div>
+            </div>
         </div>
     );
 }

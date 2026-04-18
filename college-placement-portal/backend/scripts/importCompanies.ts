@@ -1,5 +1,9 @@
+import path from 'path';
+import { config } from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { importCompanyProfilesFromJson } from '../src/services/companyJsonImport.service';
+
+config({ path: path.join(__dirname, '../.env') });
 
 const prisma = new PrismaClient();
 

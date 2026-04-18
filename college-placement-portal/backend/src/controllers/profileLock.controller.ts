@@ -1,11 +1,9 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { enqueueAndSend } from '../services/notification.service';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 // SPOC: Update application status — auto-locks student if ACCEPTED
 export const updateApplicationStatus = async (req: AuthRequest, res: Response) => {

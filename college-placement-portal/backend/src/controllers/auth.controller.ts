@@ -1,13 +1,11 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { AuthRequest } from '../middlewares/auth.middleware';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 /** Plain-text demo passwords for SPOC / Coordinator only (must match prisma/seed). Checked before bcrypt. */

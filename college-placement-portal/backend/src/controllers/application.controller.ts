@@ -1,13 +1,11 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { enqueueAndSend, sendWhatsApp } from '../services/notification.service';
-import { getResumeTextForAts } from './ats.controller';
+import { getResumeTextForAtsWithMeta, getJobTextForAts, buildResumeInputForAtsParser } from './ats.controller';
 import { getATSAnalysis, parseResumeWithLlm } from '../services/atsAnalysis.service';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 const MIN_RESUME_TEXT_LENGTH = 50;
 const ATS_DEBUG = String(process.env.ATS_DEBUG || '').toLowerCase() === 'true';
 const ATS_TIMEOUT_MS = Number(process.env.ATS_TIMEOUT_MS || 12000);
@@ -72,6 +70,15 @@ function safeJsonStringify(value: unknown, label: string): string {
         console.error(`[applyForJob] ${label} JSON.stringify failed:`, e);
         return '{}';
     }
+}
+
+function toFiniteNumberOrNull(value: unknown): number | null {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
 }
 
 const defaultAtsResult = {
@@ -142,12 +149,8 @@ export const applyForJob = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ success: false, message: 'You have already applied for this job' });
         }
 
-        // Enforce Eligibility
-        if (job.cgpaMin !== null && job.cgpaMin > (student.cgpa || 0)) {
-            return res.status(400).json({ success: false, message: `Your CGPA (${student.cgpa || 0}) does not meet the minimum requirement of ${job.cgpaMin}.` });
-        }
-
         const eligibleBranches = parseJsonStringArray(job.eligibleBranches);
+        const requiredFields = parseJsonStringArray(job.requiredProfileFields);
 
         if (eligibleBranches.length > 0 && !branchIsEligible(student.branch, eligibleBranches)) {
             return res.status(400).json({ success: false, message: `Your branch (${student.branch || 'not set'}) is not eligible for this job.` });
@@ -157,7 +160,6 @@ export const applyForJob = async (req: AuthRequest, res: Response) => {
         const customAnswers = req.body.answers || {};
 
         // Enforce & Extract Required Profile Fields (always a string[] — never iterate non-arrays)
-        const requiredFields = parseJsonStringArray(job.requiredProfileFields);
         const applicationDataSnapshot: Record<string, any> = {};
         const missingFields: string[] = [];
 
@@ -181,6 +183,23 @@ export const applyForJob = async (req: AuthRequest, res: Response) => {
                 message: `Your profile is missing required fields for this job: ${missingFields.join(', ')}. Please update your profile.`,
                 missingFields
             });
+        }
+
+        // Enforce minimum CGPA after profile-field checks so "missing CGPA" isn't reported as 0.
+        const studentCgpa = toFiniteNumberOrNull((student as Record<string, unknown>).cgpa);
+        if (job.cgpaMin !== null && job.cgpaMin > 0) {
+            if (studentCgpa === null) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Your profile CGPA is missing. Please update your profile before applying (minimum required: ${job.cgpaMin}).`,
+                });
+            }
+            if (job.cgpaMin > studentCgpa) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Your CGPA (${studentCgpa}) does not meet the minimum requirement of ${job.cgpaMin}.`,
+                });
+            }
         }
 
         // Create or reuse (WITHDRAWN) application first. ATS runs as non-blocking secondary process.
@@ -237,16 +256,18 @@ export const applyForJob = async (req: AuthRequest, res: Response) => {
 
         void (async () => {
             try {
-                const resumeText = await getResumeTextForAts(resume);
-                const jobText = `${job.role}\n${job.description || ''}`;
-                console.log('Resume Length:', resumeText?.length || 0);
+                const resumeMeta = await getResumeTextForAtsWithMeta(resume);
+                const resumeText = resumeMeta.text;
+                const jobText = await getJobTextForAts(job);
+                const resumeForParser = buildResumeInputForAtsParser(resumeMeta);
+                console.log('Resume Length:', resumeForParser?.length || 0);
                 console.log('JD Length:', jobText?.length || 0);
 
                 if (!resumeText || !jobText || resumeText.trim().length < MIN_RESUME_TEXT_LENGTH) {
                     throw new Error('Uploaded resume PDF could not be parsed');
                 }
 
-                const parsedResume = await parseResumeWithLlm(resumeText);
+                const parsedResume = await parseResumeWithLlm(resumeForParser);
                 const atsPromise = getATSAnalysis(parsedResume.normalizedText, jobText);
 
                 const timeoutPromise = new Promise((_, reject) => {
@@ -383,6 +404,10 @@ export const getMyApplications = async (req: AuthRequest, res: Response) => {
                         id: true,
                         role: true,
                         companyName: true,
+                        jobType: true,
+                        ctc: true,
+                        cgpaMin: true,
+                        applicationDeadline: true,
                         createdAt: true,
                         stages: {
                             orderBy: {
@@ -395,12 +420,41 @@ export const getMyApplications = async (req: AuthRequest, res: Response) => {
             orderBy: { appliedAt: 'desc' }
         });
 
+        const jobIds = Array.from(new Set(applications.map((a: any) => String(a.jobId || '')).filter(Boolean)));
+        const stageCountsByJobId = new Map<string, Map<number, number>>();
+        if (jobIds.length > 0) {
+            const allJobApps = await prisma.jobApplication.findMany({
+                where: {
+                    jobId: { in: jobIds },
+                },
+                select: {
+                    jobId: true,
+                    currentStageIndex: true,
+                    status: true,
+                },
+            });
+
+            for (const row of allJobApps as any[]) {
+                const status = String(row.status || '').toUpperCase();
+                if (status === 'WITHDRAWN') continue;
+                const jobId = String(row.jobId || '');
+                const idx = Number(row.currentStageIndex ?? -1);
+                if (!jobId || idx < 0) continue;
+                let perJob = stageCountsByJobId.get(jobId);
+                if (!perJob) {
+                    perJob = new Map<number, number>();
+                    stageCountsByJobId.set(jobId, perJob);
+                }
+                perJob.set(idx, (perJob.get(idx) || 0) + 1);
+            }
+        }
+
         const safeStatus = (s: any) => (s ? String(s).toUpperCase() : '');
 
         // Dashboard stats for student cards
         const jobsOffered = applications.filter((a: any) => {
             const s = safeStatus(a.status);
-            return s.includes('ACCEPT') || s.includes('OFFER') || s === 'SELECTED';
+            return s.includes('ACCEPT') || s.includes('OFFER') || s === 'SELECTED' || s.includes('PLACED');
         }).length;
 
         const shortlisted = applications.filter((a: any) => {
@@ -430,7 +484,7 @@ export const getMyApplications = async (req: AuthRequest, res: Response) => {
             let currentIndex = 2; // Applied
             if (status.includes('REVIEW')) currentIndex = 3;
             if (status.includes('SHORTLIST')) currentIndex = 4;
-            if (status.includes('ACCEPT') || status.includes('OFFER') || status === 'SELECTED') currentIndex = 9;
+            if (status.includes('ACCEPT') || status.includes('OFFER') || status === 'SELECTED' || status.includes('PLACED')) currentIndex = 9;
             if (status.includes('REJECT')) currentIndex = 9;
 
             const stages = Array.isArray(job?.stages) ? job.stages : [];
@@ -496,8 +550,19 @@ export const getMyApplications = async (req: AuthRequest, res: Response) => {
             const skillsMatched = (() => { try { return JSON.parse(a.skillsMatched || '[]'); } catch { return []; } })();
             const skillsMissing = (() => { try { return JSON.parse(a.skillsMissing || '[]'); } catch { return []; } })();
             const suggestions = (() => { try { return JSON.parse(a.suggestions || '[]'); } catch { return []; } })();
+            const stageCounts = stageCountsByJobId.get(String(a.jobId || '')) || new Map<number, number>();
+            const stagesWithCounts = Array.isArray(a.job?.stages)
+                ? a.job.stages.map((s: any, idx: number) => ({
+                    ...s,
+                    stageCandidateCount: stageCounts.get(idx) || 0,
+                }))
+                : [];
             return {
                 ...a,
+                job: {
+                    ...a.job,
+                    stages: stagesWithCounts,
+                },
                 matchedSkills: skillsMatched,
                 missingSkills: skillsMissing,
                 suggestions,

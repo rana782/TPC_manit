@@ -1,0 +1,103 @@
+openapi: 3.1.0
+info:
+  title: Document API Gateway (public)
+  version: 2.0.0
+  description: |
+    Public façade over upload and job services. Clients use only these routes; upstream URLs and
+    internal microservice layout are not exposed in responses.
+servers:
+  - url: http://localhost:8000
+paths:
+  /upload:
+    post:
+      summary: Upload a document (multipart)
+      operationId: publicUpload
+      parameters:
+        - in: header
+          name: X-Request-Id
+          required: false
+          schema:
+            type: string
+          description: Optional correlation id (echoed on response as X-Request-Id).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                user_id:
+                  type: string
+      responses:
+        "202":
+          description: Accepted (upload service body)
+        "400":
+          description: Validation error
+        "413":
+          description: Payload too large
+        "415":
+          description: Unsupported media type
+        "503":
+          description: Upload service unavailable
+        "504":
+          description: Gateway timeout
+  /job/{id}:
+    get:
+      summary: Poll job status and metadata
+      operationId: publicGetJob
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Job JSON (includes result when completed)
+        "404":
+          description: Job not found
+        "502":
+          description: Bad upstream response
+        "503":
+          description: Job service unavailable
+        "504":
+          description: Gateway timeout
+  /result/{id}:
+    get:
+      summary: Fetch normalized LLM-ready JSON only (completed jobs)
+      operationId: publicGetResult
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Normalized document (text, structured, metadata, llm_ready)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Job not found or result not ready
+        "502":
+          description: Bad upstream response
+        "503":
+          description: Job service unavailable
+        "504":
+          description: Gateway timeout
+  /health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: OK

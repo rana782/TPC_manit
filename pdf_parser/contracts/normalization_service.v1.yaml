@@ -1,0 +1,89 @@
+openapi: 3.1.0
+info:
+  title: Document Normalization Service
+  version: 2.0.0
+  description: |
+    Converts raw Nanonets extraction JSON into LLM-ready text, structured JSON, metadata, and
+    token-bounded chunks. No document classification or resume/JD-specific parsing.
+servers:
+  - url: http://localhost:8003
+paths:
+  /v1/normalize:
+    post:
+      summary: Normalize Nanonets JSON for LLM post-processing
+      operationId: normalizeNanonets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NormalizeRequest"
+      responses:
+        "200":
+          description: LLM-ready document payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LLMNormalizedDocument"
+        "400":
+          description: Invalid request payload
+        "413":
+          description: Request body too large
+  /v1/health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: OK
+components:
+  schemas:
+    NormalizeRequest:
+      type: object
+      required: [nanonets_response]
+      properties:
+        nanonets_response:
+          type: object
+          additionalProperties: true
+        document_id:
+          type: string
+          format: uuid
+          nullable: true
+        job_id:
+          type: string
+          format: uuid
+          nullable: true
+    LLMTextChunk:
+      type: object
+      required: [index, text, token_count, char_count]
+      properties:
+        index:
+          type: integer
+        text:
+          type: string
+        token_count:
+          type: integer
+        char_count:
+          type: integer
+    LLMReadyBundle:
+      type: object
+      required: [chunks, summary_hint]
+      properties:
+        chunks:
+          type: array
+          items:
+            $ref: "#/components/schemas/LLMTextChunk"
+        summary_hint:
+          type: string
+    LLMNormalizedDocument:
+      type: object
+      required: [text, structured, metadata, llm_ready]
+      properties:
+        text:
+          type: string
+        structured: {}
+        metadata:
+          type: object
+          additionalProperties: true
+        llm_ready:
+          $ref: "#/components/schemas/LLMReadyBundle"

@@ -16,7 +16,10 @@ const originalProcessSecrets = {
 };
 
 function uniqueEnvPathsInLoadOrder(): string[] {
+    // Repo root: college-placement-portal/.env (this file lives in backend/src/)
+    const portalRootEnv = path.resolve(__dirname, '../../.env');
     const ordered = [
+        portalRootEnv,
         path.join(process.cwd(), '.env'),
         path.join(process.cwd(), 'backend', '.env'),
         path.resolve(__dirname, '../.env'),

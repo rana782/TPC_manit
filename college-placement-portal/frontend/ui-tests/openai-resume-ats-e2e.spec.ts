@@ -9,7 +9,8 @@ import { test, expect } from '@playwright/test';
 
 const API_BASE = process.env.E2E_API_URL || 'http://localhost:5001';
 const STUDENT_EMAIL = 'ui_student@example.com';
-const PASSWORD = 'Pass@123';
+/** Must match `GET /api/seed/seed-ui` in backend (`Password@123`). */
+const PASSWORD = 'Password@123';
 
 test.describe('Resume standalone ATS (Qwen / OpenRouter)', () => {
   test('health reports LLM configured; UI gets llm engine after analyze', async ({ page, request }, testInfo) => {

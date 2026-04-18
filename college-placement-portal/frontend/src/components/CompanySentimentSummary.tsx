@@ -6,12 +6,19 @@ type Props = {
     negativeFeatures: string[];
     /** Table rows need tighter spacing and smaller type */
     compact?: boolean;
+    /** Truncate long theme text with ellipsis (card/table layouts) */
+    lineClamp?: 2 | 3;
 };
 
 /**
  * One thumbs-up row with all positive aspects; one thumbs-down row with all negative aspects.
  */
-export default function CompanySentimentSummary({ positiveFeatures, negativeFeatures, compact }: Props) {
+export default function CompanySentimentSummary({
+    positiveFeatures,
+    negativeFeatures,
+    compact,
+    lineClamp,
+}: Props) {
     if (positiveFeatures.length === 0 && negativeFeatures.length === 0) return null;
 
     const textPos = compact ? 'text-[10px]' : 'text-[11px]';
@@ -21,12 +28,15 @@ export default function CompanySentimentSummary({ positiveFeatures, negativeFeat
     const gap = compact ? 'gap-1.5' : 'gap-2.5';
     const stack = compact ? 'mt-1 space-y-1' : 'mt-2 space-y-2';
 
+    const clampClass =
+        lineClamp === 2 ? 'line-clamp-2' : lineClamp === 3 ? 'line-clamp-3' : '';
+
     return (
-        <div className={stack} aria-label="Company review themes">
+        <div className={clsx(stack, 'min-w-0 max-w-full')} aria-label="Company review themes">
             {positiveFeatures.length > 0 && (
                 <div
                     className={clsx(
-                        'flex items-start rounded-xl border bg-gradient-to-br from-emerald-50/90 to-emerald-50/40 border-emerald-100/90 shadow-sm',
+                        'flex min-w-0 max-w-full items-start rounded-xl border bg-gradient-to-br from-emerald-50/90 to-emerald-50/40 border-emerald-100/90 shadow-sm',
                         pad,
                         gap
                     )}
@@ -39,7 +49,14 @@ export default function CompanySentimentSummary({ positiveFeatures, negativeFeat
                     >
                         <ThumbsUp className={clsx(iconSm)} strokeWidth={2.25} aria-hidden />
                     </div>
-                    <p className={clsx('min-w-0 flex-1 leading-relaxed text-emerald-950/90', textPos, 'font-medium')}>
+                    <p
+                        className={clsx(
+                            'min-w-0 flex-1 break-words leading-relaxed text-emerald-950/90',
+                            textPos,
+                            'font-medium',
+                            clampClass
+                        )}
+                    >
                         {positiveFeatures.join(' · ')}
                     </p>
                 </div>
@@ -47,7 +64,7 @@ export default function CompanySentimentSummary({ positiveFeatures, negativeFeat
             {negativeFeatures.length > 0 && (
                 <div
                     className={clsx(
-                        'flex items-start rounded-xl border bg-gradient-to-br from-red-50/90 to-red-50/40 border-red-100/90 shadow-sm',
+                        'flex min-w-0 max-w-full items-start rounded-xl border bg-gradient-to-br from-red-50/90 to-red-50/40 border-red-100/90 shadow-sm',
                         pad,
                         gap
                     )}
@@ -60,7 +77,14 @@ export default function CompanySentimentSummary({ positiveFeatures, negativeFeat
                     >
                         <ThumbsDown className={clsx(iconSm)} strokeWidth={2.25} aria-hidden />
                     </div>
-                    <p className={clsx('min-w-0 flex-1 leading-relaxed text-red-950/90', textPos, 'font-medium')}>
+                    <p
+                        className={clsx(
+                            'min-w-0 flex-1 break-words leading-relaxed text-red-950/90',
+                            textPos,
+                            'font-medium',
+                            clampClass
+                        )}
+                    >
                         {negativeFeatures.join(' · ')}
                     </p>
                 </div>

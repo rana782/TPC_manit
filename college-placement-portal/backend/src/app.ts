@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import logger from './utils/logger';
 import { errorMiddleware } from './middlewares/errorMiddleware';
+import path from 'path';
 
 const app: Application = express();
 
@@ -25,7 +26,6 @@ import atsRoutes from './routes/ats.routes';
 import seedRoutes from './routes/seed.routes';
 import companyRatingRoutes from './routes/companyRating.routes';
 import companyProfileRoutes from './routes/companyProfile.routes';
-import path from 'path';
 import { getAtsChatModel, getAtsChatModelCandidates, getAtsLlmBaseUrl, getAtsLlmApiKey } from './utils/env';
 
 app.get('/api/health', (req: Request, res: Response) => {
@@ -65,9 +65,22 @@ app.use('/api/seed', seedRoutes);
 app.use('/api/company-rating', companyRatingRoutes);
 app.use('/api/companies', companyProfileRoutes);
 
-// Serve uploads directory publicly
-// Must match the directory multer writes files into
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Serve uploads directory publicly.
+// Must match the directory multer writes files into.
+// IMPORTANT: remove frame-blocking headers for uploaded assets so PDFs/images
+// can be previewed inside iframe/embed in the frontend (localhost:3000).
+app.use(
+    '/uploads',
+    express.static(path.join(__dirname, '../uploads'), {
+        setHeaders: (res) => {
+            // Helmet defaults block cross-origin iframe previews; override only for file assets.
+            res.removeHeader('X-Frame-Options');
+            res.removeHeader('Content-Security-Policy');
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+            res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
+        },
+    }),
+);
 
 app.use(errorMiddleware);
 

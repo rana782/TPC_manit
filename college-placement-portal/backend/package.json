@@ -18,7 +18,11 @@
     "seed:test-random": "ts-node scripts/seed_test_random.ts",
     "seed:coordinator": "ts-node scripts/seed_coordinator.ts",
     "migrate:local-to-supabase": "ts-node scripts/migrate_local_to_supabase.ts",
-    "seed:permanent-demo": "ts-node scripts/runPermanentDemoSeed.ts"
+    "seed:permanent-demo": "ts-node scripts/runPermanentDemoSeed.ts",
+    "seed:bulk-mock": "ts-node scripts/seed_bulk_mock.ts",
+    "seed:bulk-mock:clean": "ts-node scripts/seed_bulk_mock.ts --clean",
+    "seed:api-coverage": "ts-node scripts/seed_api_coverage.ts",
+    "seed:baseline": "ts-node scripts/seed_baseline.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.0.0",

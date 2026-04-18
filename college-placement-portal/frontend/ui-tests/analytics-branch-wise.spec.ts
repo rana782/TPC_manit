@@ -90,9 +90,9 @@ test('analytics page loads placement dashboard (replaces legacy branch-wise-only
   await page.goto('/analytics', { waitUntil: 'domcontentloaded' });
 
   await expect(page.getByTestId('analytics-dashboard-page')).toBeVisible();
-  await expect(page.getByText('Placement command center')).toBeVisible();
+  await expect(page.getByText('Placement analytics')).toBeVisible();
   await expect(page.getByText('Branch: CSE')).toHaveCount(0);
-  await expect(page.getByText('Branch intelligence')).toBeVisible();
+  await expect(page.getByText('Branch cohort vs placed')).toBeVisible();
 
   await page.screenshot({ path: `${ROOT}/branch_wise_stats/valid_case.png`, fullPage: true });
   await page.screenshot({ path: `${ROOT}/branch_wise_stats/ui_state.png`, fullPage: true });

@@ -112,6 +112,10 @@ model Resume {
   fileName     String
   fileUrl      String
   isActive     Boolean          @default(true) // active for selection when applying
+  /// Cached plain text for ATS (Nanonets or PDF fallback) to avoid repeat extraction
+  extractedText String?       @db.Text
+  /// Structured extraction from Nanonets when available
+  extractedJson Json?
   applications JobApplication[]
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
@@ -213,6 +217,8 @@ model JobStage {
   scheduledDate DateTime
   status        String @default("")
   shortlistDocPath String?
+  /// Optional label for the pipeline shortlist PDF (shown in links)
+  shortlistDocTitle String?
   /// Optional comments / instructions for this stage (shown in Job Timeline)
   notes         String?
   /// Optional PDF or image uploaded when the stage was created

@@ -1,11 +1,9 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { enqueueAndSend, getNotificationsForUser, sendPlacementResultEmailWebhook, sendWhatsApp } from '../services/notification.service';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 const DEFAULT_NOTIFICATION_TEMPLATES: Record<string, string> = {
     APPLICATION_CONFIRMATION: 'Hello {student_name}, your application for {role} at {company_name} has been submitted. We\'ll update you about OA/Interview dates. - TPCC',
     OA_SCHEDULED: 'Hello {student_name}, OA for {company_name} ({role}) is scheduled on {date}. Check portal. - TPCC',
@@ -51,7 +49,10 @@ export const sendTemplateNotification = async (req: AuthRequest, res: Response) 
 // Admin: Get recent Notification Logs
 export const getNotificationLogs = async (req: AuthRequest, res: Response) => {
     try {
+        const channel = String(req.query?.channel || '').trim().toUpperCase();
+        const whereClause = channel ? { channel } : undefined;
         const logs = await prisma.notificationLog.findMany({
+            where: whereClause,
             orderBy: { createdAt: 'desc' },
             take: 50,
             include: {
@@ -95,6 +96,73 @@ export const updateSettings = async (req: AuthRequest, res: Response) => {
         res.json({ success: true, message: 'Settings updated successfully', setting });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Failed to update settings' });
+    }
+};
+
+// Admin: get EMAIL webhook enable/disable setting
+export const getEmailSettings = async (req: AuthRequest, res: Response) => {
+    try {
+        let setting = await prisma.systemSetting.findUnique({ where: { key: 'EMAIL_WEBHOOK_ENABLED' } });
+        if (!setting) {
+            setting = await prisma.systemSetting.create({
+                data: { key: 'EMAIL_WEBHOOK_ENABLED', value: process.env.EMAIL_WEBHOOK_ENABLED || 'false' },
+            });
+        }
+        res.json({ success: true, setting });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to fetch email settings' });
+    }
+};
+
+// Admin: update EMAIL webhook enable/disable setting
+export const updateEmailSettings = async (req: AuthRequest, res: Response) => {
+    try {
+        const enabled = !!req.body?.emailEnabled;
+        const setting = await prisma.systemSetting.upsert({
+            where: { key: 'EMAIL_WEBHOOK_ENABLED' },
+            create: { key: 'EMAIL_WEBHOOK_ENABLED', value: String(enabled) },
+            update: { value: String(enabled) },
+        });
+        res.json({ success: true, message: 'Email settings updated successfully', setting });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to update email settings' });
+    }
+};
+
+// Admin: get default placement email template used by automation
+export const getPlacementEmailTemplate = async (req: AuthRequest, res: Response) => {
+    try {
+        const setting = await prisma.systemSetting.findUnique({ where: { key: 'PLACEMENT_EMAIL_TEMPLATE' } });
+        const fallback = 'We\'re thrilled to share this, {student_name}! 🎉 Congratulations on being placed at {company_name} as {role}. With a CTC of {ctc}, this achievement reflects your dedication and talent. Please send your acceptance at tpwnitb@gmail.com.';
+        res.json({
+            success: true,
+            template: setting?.value?.trim() ? setting.value : fallback,
+            source: setting ? 'DB' : 'DEFAULT',
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to fetch email template' });
+    }
+};
+
+// Admin: update default placement email template used by automation
+export const updatePlacementEmailTemplate = async (req: AuthRequest, res: Response) => {
+    try {
+        const raw = req.body?.templateText;
+        if (typeof raw !== 'string' || !raw.trim()) {
+            return res.status(400).json({ success: false, message: 'templateText is required' });
+        }
+        const setting = await prisma.systemSetting.upsert({
+            where: { key: 'PLACEMENT_EMAIL_TEMPLATE' },
+            create: { key: 'PLACEMENT_EMAIL_TEMPLATE', value: raw.trim() },
+            update: { value: raw.trim() },
+        });
+        return res.json({
+            success: true,
+            message: 'Placement email template updated successfully',
+            setting,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Failed to update email template' });
     }
 };
 

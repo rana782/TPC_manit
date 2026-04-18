@@ -8,6 +8,7 @@ import {
     deleteResume,
     setResumeActive,
     uploadDocument,
+    deleteStudentDocument,
     addInternship,
     deleteInternship,
     addCertification,
@@ -34,6 +35,7 @@ router.put('/resume/:id/active', setResumeActive);
 
 // Documents
 router.post('/document', docUpload.single('document'), uploadDocument);
+router.delete('/document/:id', deleteStudentDocument);
 
 // Internships
 router.post('/internships', addInternship);

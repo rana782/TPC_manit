@@ -1,9 +1,7 @@
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { publishLinkedInAnnouncement } from '../services/linkedin.service';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 // POST /api/announcements/job/:job_id/publish
 export const publishAnnouncement = async (req: AuthRequest, res: Response) => {

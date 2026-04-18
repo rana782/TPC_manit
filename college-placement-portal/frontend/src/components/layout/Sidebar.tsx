@@ -12,6 +12,7 @@ import {
     Users,
     LogOut,
     ChevronLeft,
+    ChevronRight,
     X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -36,13 +37,18 @@ const navItems: NavItem[] = [
     { to: '/profile', icon: UserCircle, label: 'Profile', roles: ['STUDENT'] },
     { to: '/resumes', icon: FileText, label: 'Resumes', roles: ['STUDENT'] },
     { to: '/job-board', icon: Briefcase, label: 'Job Board', roles: ['STUDENT'] },
-    { to: '/jobs-management', icon: Settings, label: 'Manage Jobs', roles: ['SPOC', 'COORDINATOR'] },
+    { to: '/jobs-management', icon: Settings, label: 'Manage Jobs', roles: ['SPOC'] },
     { to: '/admin', icon: ShieldCheck, label: 'Admin Panel', roles: ['COORDINATOR'] },
     { to: '/analytics', icon: BarChart3, label: 'Analytics', roles: ['SPOC', 'COORDINATOR'] },
     { to: '/alumni', icon: Users, label: 'Alumni', roles: ['STUDENT', 'SPOC', 'COORDINATOR'] },
 ];
 
-function SidebarContent({ collapsed, onToggle, onMobileClose, isMobile }: {
+function SidebarContent({
+    collapsed,
+    onToggle,
+    onMobileClose,
+    isMobile,
+}: {
     collapsed: boolean;
     onToggle: () => void;
     onMobileClose: () => void;
@@ -51,9 +57,7 @@ function SidebarContent({ collapsed, onToggle, onMobileClose, isMobile }: {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
 
-    const filteredItems = navItems.filter(
-        (item) => user && item.roles.includes(user.role)
-    );
+    const filteredItems = navItems.filter((item) => user && item.roles.includes(user.role));
 
     const handleLogout = () => {
         logout();
@@ -61,68 +65,69 @@ function SidebarContent({ collapsed, onToggle, onMobileClose, isMobile }: {
     };
 
     return (
-        <div className="flex flex-col h-full bg-white border-r border-gray-200">
-            {/* Logo header */}
-            <div className={clsx(
-                'flex items-center h-16 border-b border-gray-100 flex-shrink-0',
-                collapsed ? 'justify-center px-2' : 'px-5'
-            )}>
-                <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex h-full flex-col bg-slate-50 border-r border-slate-200/90">
+            {/* Brand */}
+            <div
+                className={clsx(
+                    'flex flex-shrink-0 items-center border-b border-slate-200/80',
+                    isMobile ? 'h-[4.5rem] px-5' : collapsed ? 'h-16 justify-center px-2' : 'min-h-[5.5rem] px-6 py-5'
+                )}
+            >
+                <div className={clsx('flex min-w-0 items-center gap-3', collapsed && !isMobile && 'justify-center')}>
                     <img
                         src={manitLogo}
-                        alt="MANIT Logo"
-                        className={clsx(
-                            'object-contain flex-shrink-0',
-                            collapsed ? 'w-9 h-9' : 'w-10 h-10'
-                        )}
+                        alt="MANIT"
+                        className={clsx('object-contain flex-shrink-0', collapsed && !isMobile ? 'h-9 w-9' : 'h-10 w-10')}
                     />
-                    {!collapsed && (
-                        <motion.span
-                            initial={{ opacity: 0, width: 0 }}
-                            animate={{ opacity: 1, width: 'auto' }}
-                            exit={{ opacity: 0, width: 0 }}
-                            className="text-base font-bold text-gray-900 tracking-tight whitespace-nowrap overflow-hidden"
-                        >
-                            TPC Portal
-                        </motion.span>
+                    {(!collapsed || isMobile) && (
+                        <div className="min-w-0">
+                            <p className="font-display text-lg font-bold leading-tight tracking-tight text-slate-900">
+                                TPC Portal
+                            </p>
+                            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                Training &amp; Placement
+                            </p>
+                        </div>
                     )}
                 </div>
 
-                {/* Close button for mobile */}
                 {isMobile && (
                     <button
+                        type="button"
                         onClick={onMobileClose}
-                        className="ml-auto p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"
+                        className="ml-auto rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-200/80 hover:text-slate-800"
+                        aria-label="Close menu"
                     >
-                        <X className="w-5 h-5" />
+                        <X className="h-5 w-5" />
                     </button>
                 )}
 
-                {/* Collapse toggle for desktop */}
                 {!isMobile && !collapsed && (
                     <button
+                        type="button"
                         onClick={onToggle}
-                        className="ml-auto p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                        className="ml-auto rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-200/80 hover:text-slate-700"
+                        aria-label="Collapse sidebar"
                     >
-                        <ChevronLeft className="w-4 h-4" />
+                        <ChevronLeft className="h-4 w-4" />
                     </button>
                 )}
             </div>
 
-            {/* Navigation */}
-            <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+            <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4" aria-label="Primary">
                 {filteredItems.map((item) => (
                     <NavLink
                         key={item.to}
                         to={item.to}
                         onClick={isMobile ? onMobileClose : undefined}
+                        title={collapsed && !isMobile ? item.label : undefined}
                         className={({ isActive }) =>
                             clsx(
-                                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
-                                collapsed && 'justify-center px-2',
+                                'flex items-center gap-3 border-r-4 py-2.5 text-sm transition-colors duration-150',
+                                collapsed && !isMobile ? 'justify-center px-2' : 'px-3',
                                 isActive
-                                    ? 'bg-primary-50 text-primary-700'
-                                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                                    ? 'border-primary-800 bg-slate-200/60 font-semibold text-primary-950'
+                                    : 'border-transparent font-medium text-slate-600 hover:border-slate-200 hover:bg-slate-200/50 hover:text-slate-900'
                             )
                         }
                     >
@@ -130,40 +135,50 @@ function SidebarContent({ collapsed, onToggle, onMobileClose, isMobile }: {
                             <>
                                 <item.icon
                                     className={clsx(
-                                        'w-5 h-5 flex-shrink-0',
-                                        isActive ? 'text-primary-600' : 'text-gray-400'
+                                        'h-5 w-5 flex-shrink-0',
+                                        isActive ? 'text-primary-800' : 'text-slate-400'
                                     )}
+                                    aria-hidden
                                 />
-                                {!collapsed && (
-                                    <span className="truncate">{item.label}</span>
-                                )}
+                                {(!collapsed || isMobile) && <span className="truncate">{item.label}</span>}
                             </>
                         )}
                     </NavLink>
                 ))}
             </nav>
 
-            {/* User / Logout */}
-            <div className={clsx(
-                'border-t border-gray-100 p-3 flex-shrink-0',
-                collapsed && 'flex justify-center'
-            )}>
+            <div
+                className={clsx(
+                    'flex-shrink-0 border-t border-slate-200/80 p-3',
+                    collapsed && !isMobile && 'flex flex-col items-center gap-2'
+                )}
+            >
                 {!collapsed && user && (
-                    <div className="px-3 py-2 mb-2">
-                        <p className="text-sm font-semibold text-gray-900 truncate">{user.email}</p>
-                        <p className="text-xs text-gray-500">{user.role}</p>
+                    <div className="mb-2 rounded-lg bg-white/60 px-3 py-2">
+                        <p className="truncate text-xs font-semibold text-slate-900">{user.email}</p>
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{user.role}</p>
                     </div>
                 )}
+                {!isMobile && collapsed && (
+                    <button
+                        type="button"
+                        onClick={onToggle}
+                        className="flex w-full items-center justify-center rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-200/80 hover:text-slate-800"
+                        aria-label="Expand sidebar"
+                    >
+                        <ChevronRight className="h-4 w-4" />
+                    </button>
+                )}
                 <button
+                    type="button"
                     onClick={handleLogout}
                     className={clsx(
-                        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium w-full',
-                        'text-gray-600 hover:bg-red-50 hover:text-red-600 transition-all duration-200',
-                        collapsed && 'justify-center px-2'
+                        'flex w-full items-center gap-3 rounded-lg py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-red-50 hover:text-red-700',
+                        collapsed && !isMobile ? 'justify-center px-2' : 'px-3'
                     )}
                 >
-                    <LogOut className="w-5 h-5 flex-shrink-0" />
-                    {!collapsed && <span>Logout</span>}
+                    <LogOut className="h-5 w-5 flex-shrink-0" aria-hidden />
+                    {(!collapsed || isMobile) && <span>Sign out</span>}
                 </button>
             </div>
         </div>
@@ -173,12 +188,11 @@ function SidebarContent({ collapsed, onToggle, onMobileClose, isMobile }: {
 export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: SidebarProps) {
     return (
         <>
-            {/* Desktop sidebar */}
             <motion.aside
                 initial={false}
-                animate={{ width: collapsed ? 72 : 260 }}
+                animate={{ width: collapsed ? 72 : 256 }}
                 transition={{ duration: 0.2, ease: 'easeInOut' }}
-                className="hidden lg:flex flex-col fixed inset-y-0 left-0 z-30 bg-white"
+                className="fixed inset-y-0 left-0 z-30 hidden h-screen flex-col border-r border-slate-200/90 bg-slate-50 lg:flex"
             >
                 <SidebarContent
                     collapsed={collapsed}
@@ -188,7 +202,6 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                 />
             </motion.aside>
 
-            {/* Mobile overlay */}
             <AnimatePresence>
                 {mobileOpen && (
                     <>
@@ -196,21 +209,23 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="fixed inset-0 bg-black/40 z-40 lg:hidden"
+                            transition={{ duration: 0.2 }}
+                            className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm lg:hidden"
                             onClick={onMobileClose}
+                            aria-hidden
                         />
                         <motion.aside
-                            initial={{ x: -280 }}
+                            initial={{ x: -288 }}
                             animate={{ x: 0 }}
-                            exit={{ x: -280 }}
+                            exit={{ x: -288 }}
                             transition={{ duration: 0.25, ease: 'easeOut' }}
-                            className="fixed inset-y-0 left-0 w-[260px] z-50 lg:hidden"
+                            className="fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col shadow-2xl lg:hidden"
                         >
                             <SidebarContent
                                 collapsed={false}
                                 onToggle={onToggle}
                                 onMobileClose={onMobileClose}
-                                isMobile={true}
+                                isMobile
                             />
                         </motion.aside>
                     </>

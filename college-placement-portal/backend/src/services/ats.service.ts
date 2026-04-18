@@ -10,8 +10,8 @@
  */
 
 import OpenAI from 'openai';
-import { PrismaClient } from '@prisma/client';
 import { getAtsLlmBaseUrl, getOpenAiApiKey, normalizeEnvKey } from '../utils/env';
+import prisma from '../lib/prisma';
 
 function createEmbeddingClient(): OpenAI {
     const apiKey = getOpenAiApiKey() || '';
@@ -39,7 +39,6 @@ function getEmbeddingModelName(): string {
     return 'text-embedding-3-small';
 }
 
-const prisma = new PrismaClient();
 
 export interface AtsResult {
     score: number;             // Backward-compatible ATS score

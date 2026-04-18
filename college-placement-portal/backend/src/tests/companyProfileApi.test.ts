@@ -56,5 +56,21 @@ describe('Company profile lookup/suggest APIs', () => {
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body[0].companyName).toBe('Infosys');
   });
+
+  test('lookup-batch should return profiles keyed by requested names', async () => {
+    const res = await request(app)
+      .post('/api/companies/lookup-batch')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ names: ['TCS Ltd', 'INFOSYS', 'Unknown Corp XYZ'] });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    const p = res.body.profiles;
+    expect(p['TCS Ltd'].found).toBe(true);
+    expect(p['TCS Ltd'].rating).toBe(4.2);
+    expect(p['INFOSYS'].found).toBe(true);
+    expect(p['INFOSYS'].reviews).toBe(80000);
+    expect(p['Unknown Corp XYZ'].found).toBe(false);
+    expect(p['Unknown Corp XYZ'].rating).toBeNull();
+  });
 });
 

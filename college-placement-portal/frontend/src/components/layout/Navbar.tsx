@@ -1,12 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Menu, Bell, ChevronDown, LogOut, UserCircle, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import { useAuth } from '../../context/AuthContext';
-
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+import { getViteApiOrigin } from '../../utils/apiBase';
 
 interface Notification {
     id: string;
@@ -30,6 +29,12 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
     const dropdownRef = useRef<HTMLDivElement>(null);
     const notifRef = useRef<HTMLDivElement>(null);
 
+    const apiOrigin = useMemo(() => getViteApiOrigin(), []);
+    const notificationsUrl = useMemo(
+        () => (apiOrigin ? `${apiOrigin}/api/notifications` : '/api/notifications'),
+        [apiOrigin]
+    );
+
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -45,7 +50,8 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
 
     useEffect(() => {
         if (notifOpen && token) {
-            axios.get(`${API}/api/notifications`, { headers: { Authorization: `Bearer ${token}` } })
+            axios
+                .get(notificationsUrl, { headers: { Authorization: `Bearer ${token}` } })
                 .then((res) => {
                     if (res.data?.success && Array.isArray(res.data.notifications)) {
                         setNotifications(res.data.notifications);
@@ -53,7 +59,7 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
                 })
                 .catch(() => {});
         }
-    }, [notifOpen, token]);
+    }, [notifOpen, token, notificationsUrl]);
 
     const handleLogout = () => {
         setDropdownOpen(false);
@@ -65,40 +71,52 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
     const unreadCount = notifications.filter((n) => !n.isRead).length;
 
     return (
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-6 flex-shrink-0">
-            {/* Left side */}
-            <div className="flex items-center gap-3">
-                {/* Mobile hamburger */}
+        <header className="sticky top-0 z-20 flex h-16 flex-shrink-0 items-center justify-between border-b border-slate-200/90 bg-white px-4 shadow-sm sm:px-6 lg:px-8">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
                 <button
+                    type="button"
                     onClick={onMenuClick}
-                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 lg:hidden"
+                    className="-ml-1 rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 lg:hidden"
+                    aria-label="Open menu"
                 >
-                    <Menu className="w-5 h-5" />
+                    <Menu className="h-5 w-5" />
                 </button>
 
-                {/* Desktop sidebar expand (only when collapsed) */}
                 {sidebarCollapsed && (
                     <button
+                        type="button"
                         onClick={onSidebarToggle}
-                        className="hidden lg:flex p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                        className="hidden rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 lg:flex"
+                        aria-label="Expand sidebar"
                     >
-                        <ChevronRight className="w-4 h-4" />
+                        <ChevronRight className="h-4 w-4" />
                     </button>
                 )}
+
+                <div className="hidden min-w-0 md:block">
+                    <p className="font-display truncate text-lg font-bold tracking-tight text-slate-900 lg:text-xl">
+                        TPC Portal
+                    </p>
+                    <p className="truncate text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                        MANIT Bhopal
+                    </p>
+                </div>
+                <span className="font-display text-base font-bold tracking-tight text-slate-900 md:hidden">TPC</span>
             </div>
 
-            {/* Right side */}
-            <div className="flex items-center gap-2">
-                {/* Notification bell */}
+            <div className="flex items-center gap-1 sm:gap-2">
                 <div ref={notifRef} className="relative">
                     <button
+                        type="button"
                         data-testid="notification-bell"
                         onClick={() => setNotifOpen(!notifOpen)}
-                        className="relative p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+                        className="relative rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                        aria-expanded={notifOpen}
+                        aria-haspopup="true"
                     >
-                        <Bell className="w-5 h-5" />
+                        <Bell className="h-5 w-5" />
                         {unreadCount > 0 && (
-                            <span className="absolute top-1.5 right-1.5 min-w-[8px] h-2 px-1 bg-red-500 rounded-full text-[10px] text-white font-bold flex items-center justify-center">
+                            <span className="absolute right-1.5 top-1.5 flex h-2 min-w-2 items-center justify-center rounded-full bg-red-500 px-0.5 text-[9px] font-bold text-white">
                                 {unreadCount > 9 ? '9+' : unreadCount}
                             </span>
                         )}
@@ -106,30 +124,37 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
                     <AnimatePresence>
                         {notifOpen && (
                             <motion.div
-                                initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                                initial={{ opacity: 0, y: 8, scale: 0.98 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                                exit={{ opacity: 0, y: 8, scale: 0.98 }}
                                 transition={{ duration: 0.15 }}
-                                className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-200 py-1.5 z-50"
+                                className="absolute right-0 mt-2 w-[min(100vw-2rem,20rem)] rounded-xl border border-slate-200/90 bg-white py-1.5 shadow-lg sm:w-80"
                             >
-                                <div className="px-4 py-3 border-b border-gray-100">
-                                    <p className="text-sm font-semibold text-gray-900">Notifications</p>
+                                <div className="border-b border-slate-100 px-4 py-3">
+                                    <p className="text-sm font-semibold text-slate-900">Notifications</p>
                                 </div>
                                 <div className="max-h-80 overflow-y-auto">
                                     {notifications.length === 0 ? (
-                                        <div className="px-4 py-8 text-center text-sm text-gray-500">No notifications</div>
+                                        <div className="px-4 py-8 text-center text-sm text-slate-500">
+                                            No notifications
+                                        </div>
                                     ) : (
                                         notifications.map((n) => (
                                             <div
                                                 key={n.id}
                                                 className={clsx(
-                                                    'px-4 py-3 text-sm border-b border-gray-50 last:border-0',
-                                                    !n.isRead && 'bg-primary-50/30'
+                                                    'border-b border-slate-50 px-4 py-3 text-sm last:border-0',
+                                                    !n.isRead && 'bg-primary-50/40'
                                                 )}
                                             >
-                                                <p className="text-gray-700 leading-relaxed">{n.message}</p>
-                                                <p className="text-xs text-gray-400 mt-1">
-                                                    {new Date(n.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                <p className="leading-relaxed text-slate-700">{n.message}</p>
+                                                <p className="mt-1 text-xs text-slate-400">
+                                                    {new Date(n.createdAt).toLocaleDateString('en-IN', {
+                                                        day: 'numeric',
+                                                        month: 'short',
+                                                        hour: '2-digit',
+                                                        minute: '2-digit',
+                                                    })}
                                                 </p>
                                             </div>
                                         ))
@@ -140,53 +165,62 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
                     </AnimatePresence>
                 </div>
 
-                {/* Profile dropdown */}
-                <div ref={dropdownRef} className="relative">
+                <div ref={dropdownRef} className="relative border-l border-slate-100 pl-2 sm:pl-4">
                     <button
+                        type="button"
                         onClick={() => setDropdownOpen(!dropdownOpen)}
-                        className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                        className="flex items-center gap-2 rounded-full p-1 pl-1.5 pr-2 transition-colors hover:bg-slate-100 sm:pr-3"
+                        aria-expanded={dropdownOpen}
+                        aria-haspopup="true"
                     >
-                        <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center">
-                            <span className="text-sm font-semibold text-white">{initials}</span>
+                        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary-700 text-sm font-semibold text-white">
+                            {initials}
                         </div>
-                        <div className="hidden md:block text-left">
-                            <p className="text-sm font-medium text-gray-900 leading-tight truncate max-w-[120px]">
+                        <div className="hidden text-left md:block">
+                            <p className="max-w-[140px] truncate text-sm font-medium leading-tight text-slate-900">
                                 {user?.email}
                             </p>
-                            <p className="text-xs text-gray-500">{user?.role}</p>
+                            <p className="text-xs font-medium text-slate-500">{user?.role}</p>
                         </div>
-                        <ChevronDown className={clsx(
-                            'w-4 h-4 text-gray-400 hidden md:block transition-transform',
-                            dropdownOpen && 'rotate-180'
-                        )} />
+                        <ChevronDown
+                            className={clsx(
+                                'hidden h-4 w-4 flex-shrink-0 text-slate-400 transition-transform sm:block',
+                                dropdownOpen && 'rotate-180'
+                            )}
+                        />
                     </button>
 
                     <AnimatePresence>
                         {dropdownOpen && (
                             <motion.div
-                                initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                                initial={{ opacity: 0, y: 8, scale: 0.98 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                                exit={{ opacity: 0, y: 8, scale: 0.98 }}
                                 transition={{ duration: 0.15 }}
-                                className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-gray-200 py-1.5 z-50"
+                                className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-200/90 bg-white py-1.5 shadow-lg"
                             >
-                                <div className="px-4 py-2.5 border-b border-gray-100">
-                                    <p className="text-sm font-semibold text-gray-900 truncate">{user?.email}</p>
-                                    <p className="text-xs text-gray-500 mt-0.5">{user?.role}</p>
+                                <div className="border-b border-slate-100 px-4 py-2.5">
+                                    <p className="truncate text-sm font-semibold text-slate-900">{user?.email}</p>
+                                    <p className="mt-0.5 text-xs text-slate-500">{user?.role}</p>
                                 </div>
                                 <button
-                                    onClick={() => { setDropdownOpen(false); navigate('/profile'); }}
-                                    className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                    type="button"
+                                    onClick={() => {
+                                        setDropdownOpen(false);
+                                        navigate('/profile');
+                                    }}
+                                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-50"
                                 >
-                                    <UserCircle className="w-4 h-4 text-gray-400" />
-                                    View Profile
+                                    <UserCircle className="h-4 w-4 text-slate-400" />
+                                    View profile
                                 </button>
-                                <div className="border-t border-gray-100 mt-1 pt-1">
+                                <div className="mt-1 border-t border-slate-100 pt-1">
                                     <button
+                                        type="button"
                                         onClick={handleLogout}
-                                        className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50"
                                     >
-                                        <LogOut className="w-4 h-4" />
+                                        <LogOut className="h-4 w-4" />
                                         Sign out
                                     </button>
                                 </div>

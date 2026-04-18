@@ -1,9 +1,7 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
-import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 const ZAPIER_ENABLED = process.env.ZAPIER_ENABLED === 'true';
 const ZAPIER_WEBHOOK_URL = process.env.ZAPIER_WEBHOOK_URL || '';

@@ -1,10 +1,17 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import path from 'path';
+import { Prisma } from '@prisma/client';
 import fs from 'fs';
 import { getATSAnalysis, getAbsoluteResumeAnalysis, parseResumeWithLlm } from '../services/atsAnalysis.service';
+import {
+    buildResumeInputForAtsParser,
+    extractFromPublicFileUrl,
+    getAtsNanonetsBudgetMs,
+    logDocumentExtraction,
+    normalizeExtractedText,
+    resolveUploadAbsolutePath,
+} from '../services/document.service';
 
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pdfParseModule = require('pdf-parse') as any;
@@ -13,29 +20,129 @@ const PDFParse = pdfParseModule?.PDFParse;
 const MIN_RESUME_TEXT_LENGTH = 50;
 const ATS_DEBUG = String(process.env.ATS_DEBUG || '').toLowerCase() === 'true';
 
-export async function getResumeTextForAts(resume: any): Promise<string> {
-    const extracted = await extractResumeText(resume?.fileUrl || '');
-    return (extracted || '').trim();
+export type ResumeExtractionOptions = {
+    /** Nanonets HTTP timeout for this call (upload prefetch uses a larger default). */
+    nanonetsBudgetMs?: number;
+};
+
+export type ResumeTextSource = 'cache' | 'nanonets' | 'pdf' | 'empty';
+
+export type ResumeTextMeta = {
+    text: string;
+    source: ResumeTextSource;
+    length: number;
+    extractedJson: unknown | null;
+};
+
+/** Plain + structured text for ATS pipeline (after extraction, before parseResumeWithLlm). */
+export async function getResumeTextForAts(resume: any, opts?: ResumeExtractionOptions): Promise<string> {
+    const meta = await getResumeTextForAtsWithMeta(resume, opts);
+    return buildResumeInputForAtsParser(meta);
 }
 
 export async function getResumeTextForAtsWithMeta(
-    resume: any
-): Promise<{ text: string; source: 'pdf' | 'empty'; length: number }> {
-    const extracted = await extractResumeText(resume?.fileUrl || '');
-    const extractedLen = (extracted || '').trim().length;
-    return { text: extracted || '', source: extractedLen > 0 ? 'pdf' : 'empty', length: extractedLen };
+    resume: any,
+    opts?: ResumeExtractionOptions
+): Promise<ResumeTextMeta> {
+    const cached = String(resume?.extractedText || '').trim();
+    if (cached.length >= MIN_RESUME_TEXT_LENGTH) {
+        const j = resume?.extractedJson ?? null;
+        logDocumentExtraction({
+            context: 'resume_ats',
+            source: 'cache',
+            success: true,
+            timeMs: 0,
+            resumeId: resume?.id,
+        });
+        return { text: cached, source: 'cache', length: cached.length, extractedJson: j };
+    }
+
+    const fileUrl = resume?.fileUrl || '';
+    const nanoBudget = opts?.nanonetsBudgetMs ?? getAtsNanonetsBudgetMs();
+    const nano = await extractFromPublicFileUrl(fileUrl, {
+        timeoutMs: nanoBudget,
+        context: 'resume_ats',
+    });
+    if (nano && nano.text.trim().length >= MIN_RESUME_TEXT_LENGTH) {
+        const text = normalizeExtractedText(nano.text);
+        if (resume?.id) {
+            await prisma.resume
+                .update({
+                    where: { id: resume.id },
+                    data: {
+                        extractedText: text,
+                        extractedJson: nano.extracted_json as Prisma.InputJsonValue,
+                    },
+                })
+                .catch(() => {});
+        }
+        return {
+            text,
+            source: 'nanonets',
+            length: text.length,
+            extractedJson: nano.extracted_json,
+        };
+    }
+
+    const pdfStarted = Date.now();
+    const pdfText = await extractResumeText(fileUrl);
+    const trimmed = (pdfText || '').trim();
+    if (trimmed.length >= MIN_RESUME_TEXT_LENGTH && resume?.id) {
+        await prisma.resume
+            .update({
+                where: { id: resume.id },
+                data: { extractedText: trimmed },
+            })
+            .catch(() => {});
+    }
+    logDocumentExtraction({
+        context: 'resume_ats',
+        source: 'pdf-parse',
+        success: trimmed.length >= MIN_RESUME_TEXT_LENGTH,
+        timeMs: Date.now() - pdfStarted,
+        resumeId: resume?.id,
+    });
+    return {
+        text: trimmed,
+        source: trimmed.length > 0 ? 'pdf' : 'empty',
+        length: trimmed.length,
+        extractedJson: resume?.extractedJson ?? null,
+    };
 }
 
-// Utility: extract text from uploaded PDF
+/** Job text for ATS: role, description, plus optional JD file (`jdPath`) via document extraction with fallback. */
+export async function getJobTextForAts(job: {
+    role: string;
+    description: string | null;
+    jdPath?: string | null;
+}): Promise<string> {
+    const parts: string[] = [job.role, job.description || ''].filter((s) => String(s || '').trim().length > 0);
+    const base = parts.join('\n');
+
+    if (!job.jdPath || !String(job.jdPath).trim()) {
+        return base;
+    }
+
+    const nano = await extractFromPublicFileUrl(job.jdPath, {
+        timeoutMs: getAtsNanonetsBudgetMs(),
+        context: 'jd_ats',
+    });
+    if (nano?.text?.trim()) {
+        return `${base}\n\n--- JD document (extracted) ---\n${normalizeExtractedText(nano.text)}`;
+    }
+
+    const fallback = await extractResumeText(job.jdPath);
+    if (fallback?.trim()) {
+        return `${base}\n\n--- JD document (extracted) ---\n${normalizeExtractedText(fallback)}`;
+    }
+
+    return base;
+}
+
+// Utility: extract text from uploaded PDF (fallback when Nanonets is off or fails)
 async function extractResumeText(fileUrl: string): Promise<string> {
     try {
-        const baseName = path.basename(fileUrl || '');
-        const candidates = [
-            path.resolve(process.cwd(), 'uploads', baseName),
-            path.resolve(__dirname, '../../uploads', baseName),
-            path.resolve(__dirname, '../../../uploads', baseName)
-        ];
-        const filePath = candidates.find((candidate) => fs.existsSync(candidate));
+        const filePath = resolveUploadAbsolutePath(fileUrl);
         if (!filePath) return '';
         const buffer = fs.readFileSync(filePath);
         if (typeof PDFParse !== 'function') return '';
@@ -78,7 +185,7 @@ export const scoreHandler = async (req: Request, res: Response): Promise<void> =
         // Extract text
         const resumeMeta = await getResumeTextForAtsWithMeta(resume);
         const resumeText = resumeMeta.text;
-        const jobText = `${job.role}\n${job.description}`;
+        const jobText = await getJobTextForAts(job);
         debugLog('Resume Text:', (resumeText || '').slice(0, 100));
         debugLog('Job Desc:', jobText.slice(0, 100));
 
@@ -90,10 +197,11 @@ export const scoreHandler = async (req: Request, res: Response): Promise<void> =
             return;
         }
 
-        debugLog('Resume Length:', resumeText?.length || 0);
+        const resumeForParser = buildResumeInputForAtsParser(resumeMeta);
+        debugLog('Resume Length:', resumeForParser?.length || 0);
         debugLog('JD Length:', jobText?.length || 0);
 
-        const parsedResume = await parseResumeWithLlm(resumeText);
+        const parsedResume = await parseResumeWithLlm(resumeForParser);
         const result = await getATSAnalysis(parsedResume.normalizedText, jobText);
         debugLog('ATS Output:', result);
 
@@ -181,7 +289,8 @@ export const absoluteScoreHandler = async (req: Request, res: Response): Promise
             return;
         }
 
-        const parsedResume = await parseResumeWithLlm(resumeText);
+        const resumeForParser = buildResumeInputForAtsParser(resumeMeta);
+        const parsedResume = await parseResumeWithLlm(resumeForParser);
         const result = await getAbsoluteResumeAnalysis(parsedResume.normalizedText);
         debugLog('Absolute ATS output:', result);
 
@@ -228,11 +337,12 @@ export const batchScoreHandler = async (req: Request, res: Response): Promise<vo
             where: { id: { in: resumeIds }, studentId: student.id },
         });
 
-        const jobText = `${job.role}\n${job.description}`;
+        const jobText = await getJobTextForAts(job);
 
         const results = await Promise.all(
             resumes.map(async (r) => {
-                const resumeText = await getResumeTextForAts(r);
+                const resumeMeta = await getResumeTextForAtsWithMeta(r);
+                const resumeText = resumeMeta.text;
                 if (!resumeText || resumeText.trim().length < MIN_RESUME_TEXT_LENGTH) {
                     return {
                         resumeId: r.id,
@@ -248,7 +358,8 @@ export const batchScoreHandler = async (req: Request, res: Response): Promise<vo
                         suggestions: []
                     };
                 }
-                const parsedResume = await parseResumeWithLlm(resumeText);
+                const resumeForParser = buildResumeInputForAtsParser(resumeMeta);
+                const parsedResume = await parseResumeWithLlm(resumeForParser);
                 const scored = await getATSAnalysis(parsedResume.normalizedText, jobText);
                 return { resumeId: r.id, roleName: r.roleName, ...scored };
             })

@@ -1,0 +1,102 @@
+openapi: 3.1.0
+info:
+  title: Document Upload Service API
+  version: 1.1.0
+  description: |
+    Ingests PDF/image uploads, persists them, registers a job in the job/persistence service, and
+    optionally forwards bytes directly to the extraction service (disabled when a worker owns extraction).
+servers:
+  - url: http://localhost:8001
+paths:
+  /v1/uploads:
+    post:
+      summary: Upload a document
+      operationId: createUpload
+      parameters:
+        - in: header
+          name: X-User-Id
+          required: false
+          schema:
+            type: string
+          description: Optional caller id when not sent as multipart form field.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                user_id:
+                  type: string
+      responses:
+        "202":
+          description: Upload stored; job registered for downstream processing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadAcceptedResponse"
+        "400":
+          description: Validation error
+        "413":
+          description: Payload too large
+  /v1/internal/documents/{document_id}/file:
+    get:
+      summary: Download stored bytes (internal; requires X-Internal-Token)
+      operationId: downloadStoredDocument
+      parameters:
+        - in: path
+          name: document_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: header
+          name: X-Internal-Token
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File bytes
+        "401":
+          description: Invalid internal token
+        "404":
+          description: Missing document
+  /v1/health:
+    get:
+      summary: Health check
+      operationId: health
+      responses:
+        "200":
+          description: OK
+components:
+  schemas:
+    UploadAcceptedResponse:
+      type: object
+      required:
+        - job_id
+        - document_id
+        - status
+        - stored_filename
+        - content_type
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: accepted
+        stored_filename:
+          type: string
+        content_type:
+          type: string
+        user_id:
+          type: string
+          nullable: true

@@ -1,9 +1,21 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import fs from 'fs';
 import path from 'path';
 
-const prisma = new PrismaClient();
+function unlinkUploadRelative(relPath: string | null | undefined) {
+    if (!relPath || typeof relPath !== 'string' || !relPath.startsWith('/uploads/')) return;
+    const name = path.basename(relPath);
+    const full = path.resolve(__dirname, '../../uploads', name);
+    try {
+        fs.unlinkSync(full);
+    } catch {
+        /* ignore missing file */
+    }
+}
+import { getResumeTextForAtsWithMeta } from './ats.controller';
+import { getUploadNanonetsBudgetMs } from '../services/document.service';
+import prisma from '../lib/prisma';
 
 const BRANCH_OPTIONS = ['CSE', 'ECE', 'MDS', 'EE', 'Mech', 'Civil', 'MME', 'Chem'] as const;
 const COURSE_OPTIONS = ['BTech', 'MTech', 'MCA', 'Dual Degree'] as const;
@@ -78,21 +90,70 @@ const certificationSchema = z.object({
     issueDate: z.string(),
 });
 
+function toNumberOrUndefined(value: unknown): number | undefined {
+    if (value === '' || value === null || value === undefined) return undefined;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+    if (typeof value === 'string') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+}
+
+function defaultStudentNamesFromEmail(email: string): { firstName: string; lastName: string } {
+    const local = (email || 'student').split('@')[0] || 'student';
+    const cleaned = local.replace(/[._-]+/g, ' ').trim() || 'student';
+    const parts = cleaned.split(/\s+/).filter(Boolean);
+    const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : 'Student');
+    if (parts.length >= 2) {
+        return { firstName: cap(parts[0]), lastName: cap(parts.slice(1).join(' ')) };
+    }
+    const one = cap(parts[0] || 'Student');
+    return { firstName: one, lastName: 'Student' };
+}
+
 // GET /api/student/profile
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
     try {
         const userId = (req as any).user?.id;
+        const role = String((req as any).user?.role || '');
         if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
 
-        const student = await prisma.student.findUnique({
+        const include = {
+            internships: true,
+            certifications: true,
+            resumes: { where: { isActive: true }, orderBy: { createdAt: 'desc' } as const },
+            documents: true,
+        } as const;
+
+        let student = await prisma.student.findUnique({
             where: { userId },
-            include: {
-                internships: true,
-                certifications: true,
-                resumes: { where: { isActive: true }, orderBy: { createdAt: 'desc' } },
-                documents: true,
-            },
+            include,
         });
+
+        if (!student && role === 'STUDENT') {
+            const user = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { email: true },
+            });
+            const { firstName, lastName } = defaultStudentNamesFromEmail(user?.email || '');
+            try {
+                await prisma.student.create({
+                    data: {
+                        userId,
+                        firstName,
+                        lastName,
+                        backlogs: 0,
+                    },
+                });
+            } catch (e: any) {
+                if (e?.code !== 'P2002') throw e;
+            }
+            student = await prisma.student.findUnique({
+                where: { userId },
+                include,
+            });
+        }
 
         if (!student) { res.status(404).json({ success: false, message: 'Profile not found' }); return; }
 
@@ -108,7 +169,15 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
         const userId = (req as any).user?.id;
         if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
 
-        const parsed = profileSchema.safeParse(req.body);
+        const payload = { ...(req.body || {}) } as Record<string, unknown>;
+        ['tenthPct', 'twelfthPct', 'cgpa', 'sgpa', 'tenthYear', 'twelfthYear', 'semester', 'backlogs'].forEach((k) => {
+            const parsedValue = toNumberOrUndefined(payload[k]);
+            if (parsedValue === undefined) delete payload[k];
+            else payload[k] = parsedValue;
+        });
+        if (payload.dob === '') delete payload.dob;
+
+        const parsed = profileSchema.safeParse(payload);
         if (!parsed.success) {
             const firstError = parsed.error.errors[0]?.message || 'Validation error';
             res.status(400).json({ success: false, error: 'Validation error', message: firstError });
@@ -171,7 +240,19 @@ export const uploadResume = async (req: Request, res: Response): Promise<void> =
             },
         });
 
-        res.status(201).json({ success: true, data: resume });
+        const resumeForExtract = await prisma.resume.findUnique({ where: { id: resume.id } });
+        if (resumeForExtract) {
+            try {
+                await getResumeTextForAtsWithMeta(resumeForExtract, {
+                    nanonetsBudgetMs: getUploadNanonetsBudgetMs(),
+                });
+            } catch (prefetchErr) {
+                console.warn('[student/resume] extraction prefetch failed (non-fatal):', prefetchErr);
+            }
+        }
+
+        const resumeOut = await prisma.resume.findUnique({ where: { id: resume.id } });
+        res.status(201).json({ success: true, data: resumeOut ?? resume });
     } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -268,6 +349,28 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
             },
         });
         res.status(201).json({ success: true, data: doc });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// DELETE /api/student/document/:id
+export const deleteStudentDocument = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = (req as any).user?.id;
+        if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
+
+        const student = await prisma.student.findUnique({ where: { userId } });
+        if (!student) { res.status(404).json({ success: false, message: 'Profile not found' }); return; }
+
+        const doc = await prisma.studentDocument.findFirst({
+            where: { id: req.params.id, studentId: student.id },
+        });
+        if (!doc) { res.status(404).json({ success: false, message: 'Document not found' }); return; }
+
+        unlinkUploadRelative(doc.fileUrl);
+        await prisma.studentDocument.delete({ where: { id: doc.id } });
+        res.json({ success: true, message: 'Document removed' });
     } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
     }

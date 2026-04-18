@@ -31,7 +31,12 @@ const storage = multer.diskStorage({
 
 function fileFilter(allowedTypes: string[]) {
     return (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
-        if (allowedTypes.includes(file.mimetype)) {
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        const resumePdfOctet =
+            allowedTypes.includes('application/pdf') &&
+            file.mimetype === 'application/octet-stream' &&
+            ext === '.pdf';
+        if (allowedTypes.includes(file.mimetype) || resumePdfOctet) {
             cb(null, true);
         } else {
             cb(new Error(`Invalid file type: ${file.mimetype}. Allowed: ${allowedTypes.join(', ')}`));

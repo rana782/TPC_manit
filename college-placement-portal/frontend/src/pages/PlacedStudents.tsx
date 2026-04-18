@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import { getViteApiBase } from '../utils/apiBase';
 import { Link } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, Unlock } from 'lucide-react';
 
@@ -23,13 +24,11 @@ export default function PlacedStudents() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [pendingId, setPendingId] = useState('');
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchPlaced = async () => {
     try {
-      const res = await axios.get(`${API}/api/profile-lock/placed`, { headers });
+      const res = await axios.get(`${getViteApiBase()}/profile-lock/placed`, { headers });
       if (res.data?.success) setRows(res.data.students || []);
     } catch (e: any) {
       setError(e.response?.data?.message || 'Failed to load placed students');
@@ -55,7 +54,7 @@ export default function PlacedStudents() {
     setMessage('');
     setError('');
     try {
-      const res = await axios.put(`${API}/api/profile-lock/${studentId}/unplace`, {}, { headers });
+      const res = await axios.put(`${getViteApiBase()}/profile-lock/${studentId}/unplace`, {}, { headers });
       if (res.data?.success) {
         setRows((prev) => prev.filter((r) => r.id !== studentId));
         setMessage('Student marked as unplaced successfully.');

@@ -1,25 +1,30 @@
 import { Request, Response, Router } from 'express';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import { upsertDemoCompanyProfiles } from '../utils/demoCompanyProfiles';
+import prisma from '../lib/prisma';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 router.get('/seed-ui', async (req: Request, res: Response) => {
     try {
         const EMAIL = 'ui_student@example.com';
         const PASS = 'Password@123';
+        const hash = await bcrypt.hash(PASS, 10);
 
         // Ensure student exists
         let user = await prisma.user.findUnique({ where: { email: EMAIL } });
         if (!user) {
-            const hash = await bcrypt.hash(PASS, 10);
             user = await prisma.user.create({
                 data: { email: EMAIL, password: hash, role: 'STUDENT', isVerified: true },
             });
             await prisma.student.create({
                 data: { userId: user.id, firstName: 'UI', lastName: 'Tester', branch: 'CS', course: 'B.Tech', cgpa: 8.5, linkedin: 'https://linkedin.com/in/uitester' },
+            });
+        } else {
+            // Keep seed credentials deterministic for UI/e2e runs.
+            await prisma.user.update({
+                where: { id: user.id },
+                data: { password: hash, role: 'STUDENT', isVerified: true, isDisabled: false },
             });
         }
 
@@ -40,11 +45,22 @@ router.get('/seed-ui', async (req: Request, res: Response) => {
         let spoc = await prisma.user.findUnique({ where: { email: 'ui_spoc@example.com' } });
         if (!spoc) {
             spoc = await prisma.user.create({
-                data: { email: 'ui_spoc@example.com', password: await bcrypt.hash(PASS, 10), role: 'SPOC', isVerified: true, permJobCreate: true, permExportCsv: true, permLockProfile: true },
+                data: { email: 'ui_spoc@example.com', password: hash, role: 'SPOC', isVerified: true, permJobCreate: true, permExportCsv: true, permLockProfile: true },
             });
         } else {
-            // Ensure existing SPOC has permissions
-            await prisma.user.update({ where: { id: spoc.id }, data: { permJobCreate: true, permExportCsv: true, permLockProfile: true } });
+            // Ensure existing SPOC has deterministic credentials and permissions.
+            await prisma.user.update({
+                where: { id: spoc.id },
+                data: {
+                    password: hash,
+                    role: 'SPOC',
+                    isVerified: true,
+                    isDisabled: false,
+                    permJobCreate: true,
+                    permExportCsv: true,
+                    permLockProfile: true,
+                },
+            });
         }
 
         const customQ = JSON.stringify([

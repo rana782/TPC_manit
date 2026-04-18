@@ -1,12 +1,12 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { getResumeTextForAtsWithMeta } from './ats.controller';
+import { getUploadNanonetsBudgetMs } from '../services/document.service';
 import fs from 'fs';
 import path from 'path';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 export const uploadResume = async (req: AuthRequest, res: Response) => {
     try {
@@ -33,7 +33,19 @@ export const uploadResume = async (req: AuthRequest, res: Response) => {
             }
         });
 
-        res.json({ success: true, resume });
+        const resumeForExtract = await prisma.resume.findUnique({ where: { id: resume.id } });
+        if (resumeForExtract) {
+            try {
+                await getResumeTextForAtsWithMeta(resumeForExtract, {
+                    nanonetsBudgetMs: getUploadNanonetsBudgetMs(),
+                });
+            } catch (prefetchErr) {
+                console.warn('[resume-upload] extraction prefetch failed (non-fatal):', prefetchErr);
+            }
+        }
+
+        const resumeOut = await prisma.resume.findUnique({ where: { id: resume.id } });
+        res.json({ success: true, resume: resumeOut ?? resume });
     } catch (error) {
         console.error(error);
         if (req.file) fs.unlinkSync(req.file.path); // Clean up if DB insert failed

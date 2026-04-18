@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
@@ -9,9 +9,10 @@ import { getViteApiBase, getViteApiOrigin } from '../utils/apiBase';
 import {
     ArrowLeft, Calendar, Users, Plus, Search, ArrowUpDown,
     CheckCircle2, Clock, AlertCircle, X, Award, Sparkles, Shield,
-    ChevronRight, ChevronDown, ChevronUp, User, FileText, Lock, Unlock, GraduationCap, UserMinus, Upload, MessageSquare,
+    ChevronRight, User, FileText, Lock, Unlock, GraduationCap, Upload, MessageSquare,
     Pencil, Trash2, Linkedin, Copy, Send
 } from 'lucide-react';
+import ApplicantPipeline, { type PipelineApplicantLike } from '../components/pipeline/ApplicantPipeline';
 
 interface JobApplication {
     id: string;
@@ -48,6 +49,7 @@ interface JobStage {
     scheduledDate: string;
     status: string;
     shortlistDocPath?: string | null;
+    shortlistDocTitle?: string | null;
     notes?: string | null;
     attachmentPath?: string | null;
     createdAt?: string;
@@ -61,6 +63,7 @@ interface TimelineStage {
     scheduledDate?: string;
     status?: string;
     shortlistDocPath?: string | null;
+    shortlistDocTitle?: string | null;
     notes?: string | null;
     attachmentPath?: string | null;
 }
@@ -155,13 +158,14 @@ function getOrderedTimelineStages(job: Job): TimelineStage[] {
         scheduledDate: s.scheduledDate,
         status: s.status,
         shortlistDocPath: s.shortlistDocPath ?? null,
+        shortlistDocTitle: s.shortlistDocTitle ?? null,
         notes: s.notes ?? null,
         attachmentPath: s.attachmentPath ?? null
     }));
 }
 
 /** Which column (0-based) this applicant belongs to — `-1` = not assigned to any timeline stage. */
-function columnIndexForApplicant(app: JobApplication, ordered: TimelineStage[]): number {
+function columnIndexForApplicant(app: PipelineApplicantLike, ordered: ReadonlyArray<{ id: string }>): number {
     const n = ordered.length;
     if (n === 0) return 0;
     if (app.currentStageIndex != null && app.currentStageIndex < 0) return -1;
@@ -173,12 +177,21 @@ function columnIndexForApplicant(app: JobApplication, ordered: TimelineStage[]):
     return Math.max(0, Math.min(idx, n - 1));
 }
 
-export default function JobDetails() {
-    const { id } = useParams<{ id: string }>();
+/** Optional: render from SPOC jobs drawer with `jobId` + `embedded` + `onClose`. */
+export type JobDetailsEmbedProps = {
+    jobId?: string | null;
+    embedded?: boolean;
+    onClose?: () => void;
+};
+
+export default function JobDetails({ jobId: jobIdProp, embedded, onClose }: JobDetailsEmbedProps = {}) {
+    const { id: routeParamId } = useParams<{ id: string }>();
+    const id = (typeof jobIdProp === 'string' && jobIdProp.trim() ? jobIdProp.trim() : routeParamId) || '';
     const navigate = useNavigate();
     const { user } = useAuth();
     const [job, setJob] = useState<Job | null>(null);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState('');
     const [companyProfile, setCompanyProfile] = useState<{
         logoUrl: string | null;
         rating: number | null;
@@ -218,8 +231,6 @@ export default function JobDetails() {
         profileLocked: true
     });
 
-    /** Expanded timeline stage panels (default: all collapsed — stage name only until opened). */
-    const [expandedStageIds, setExpandedStageIds] = useState<Record<string, boolean>>({});
     const [rowActionLoading, setRowActionLoading] = useState<string | null>(null);
     const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
 
@@ -250,12 +261,22 @@ export default function JobDetails() {
     const [emailPublishLoading, setEmailPublishLoading] = useState(false);
     const [emailPublishError, setEmailPublishError] = useState('');
     const [emailPublishMessage, setEmailPublishMessage] = useState('');
+    const [shortlistUploadingId, setShortlistUploadingId] = useState<string | null>(null);
+    const [shortlistError, setShortlistError] = useState('');
+    const [shortlistMessage, setShortlistMessage] = useState('');
 
     const apiBase = getViteApiBase();
     const token = localStorage.getItem('token');
 
     const fetchJob = async () => {
+        if (!id || !token) {
+            setJob(null);
+            setFetchError('Session expired. Please sign in again.');
+            setLoading(false);
+            return;
+        }
         try {
+            setFetchError('');
             const res = await axios.get(`${apiBase}/jobs/${id}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -267,7 +288,7 @@ export default function JobDetails() {
                     const logoRes = await axios.get(`${apiBase}/companies/lookup`, {
                         params: { name: companyName },
                         headers: { Authorization: `Bearer ${token}` },
-                        timeout: 4000
+                        timeout: 15000
                     });
                     setCompanyProfile({
                         logoUrl: typeof logoRes.data?.logoUrl === 'string' ? logoRes.data.logoUrl : null,
@@ -284,14 +305,80 @@ export default function JobDetails() {
             }
         } catch (err) {
             console.error(err);
+            const message = axios.isAxiosError(err)
+                ? err.response?.data?.message || err.message
+                : 'Failed to load job details';
+            setFetchError(message);
+            setJob(null);
         } finally {
             setLoading(false);
         }
     };
 
+    const uploadStageShortlistDoc = useCallback(
+        async (stageId: string, file: File, displayTitle?: string) => {
+            if (!id || !token) return;
+            setShortlistUploadingId(stageId);
+            setShortlistError('');
+            setShortlistMessage('');
+            try {
+                const fd = new FormData();
+                fd.append('shortlistDoc', file);
+                const t = displayTitle?.trim();
+                if (t) fd.append('shortlistDocTitle', t.slice(0, 200));
+                const res = await axios.patch(`${apiBase}/jobs/${id}/stages/${stageId}/shortlist-doc`, fd, {
+                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' },
+                });
+                if (res.data?.success) {
+                    setShortlistMessage('Shortlist document attached to stage.');
+                    await fetchJob();
+                } else {
+                    setShortlistError(res.data?.message || 'Failed to upload document.');
+                }
+            } catch (err: any) {
+                setShortlistError(err.response?.data?.message || 'Failed to upload document.');
+            } finally {
+                setShortlistUploadingId(null);
+            }
+        },
+        [id, token, apiBase]
+    );
+
+    const removeStageShortlistDoc = useCallback(
+        async (stageId: string) => {
+            if (!id || !token) return;
+            setShortlistUploadingId(stageId);
+            setShortlistError('');
+            setShortlistMessage('');
+            try {
+                const res = await axios.delete(`${apiBase}/jobs/${id}/stages/${stageId}/shortlist-doc`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (res.data?.success) {
+                    setShortlistMessage('Shortlist document removed from stage.');
+                    await fetchJob();
+                } else {
+                    setShortlistError(res.data?.message || 'Failed to remove document.');
+                }
+            } catch (err: any) {
+                setShortlistError(err.response?.data?.message || 'Failed to remove document.');
+            } finally {
+                setShortlistUploadingId(null);
+            }
+        },
+        [id, token, apiBase]
+    );
+
     useEffect(() => {
+        if (!id) {
+            setLoading(false);
+            setJob(null);
+            setFetchError('Missing job ID.');
+            return;
+        }
+        setLoading(true);
         fetchJob();
-    }, [id]);
+    }, [id, token]);
 
     const placedStudentsForCompany = useMemo(() => {
         if (!job) return [];
@@ -564,10 +651,6 @@ export default function JobDetails() {
         }
     };
 
-    const toggleStagePanel = (stageId: string) => {
-        setExpandedStageIds((prev) => ({ ...prev, [stageId]: !prev[stageId] }));
-    };
-
     const moveOneStudent = async (studentId: string, direction: 'next' | 'prev') => {
         if (!job || !id || bulkActionLoading || rowActionLoading) return;
         const app = job.applications?.find((a) => a.student.id === studentId);
@@ -664,8 +747,8 @@ export default function JobDetails() {
         );
     };
 
-    const openLockModal = (studentId: string, isLocked: boolean, e: React.MouseEvent) => {
-        e.stopPropagation();
+    const openLockModal = (studentId: string, isLocked: boolean, e?: React.MouseEvent) => {
+        e?.stopPropagation();
         setLockStudentId(studentId);
         setLockAction(isLocked ? 'unlock' : 'lock');
         setLockActionMsg('');
@@ -738,7 +821,7 @@ export default function JobDetails() {
     if (!job) return (
         <div className="p-8 text-center">
             <AlertCircle className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500 font-bold">Job not found</p>
+            <p className="text-gray-500 font-bold">{fetchError || 'Job not found'}</p>
         </div>
     );
 
@@ -797,14 +880,59 @@ export default function JobDetails() {
             sortedApps.some((a) => columnIndexForApplicant(a, orderedTimeline) === colIdx)
         );
 
+    const pipelineColumns = timelineStagesWithStudents.map(({ stage, colIdx }) => ({
+        stage: {
+            id: stage.id,
+            name: stage.name,
+            scheduledDate: stage.scheduledDate || '',
+            status: stage.status,
+            shortlistDocPath: stage.shortlistDocPath ?? null,
+            shortlistDocTitle: stage.shortlistDocTitle ?? null,
+            attachmentPath: stage.attachmentPath ?? null,
+            notes: stage.notes ?? null,
+        },
+        colIdx,
+        apps: sortedApps.filter((a) => columnIndexForApplicant(a, orderedTimeline) === colIdx),
+    }));
+
+    const pipelineOrderedStages = orderedTimeline.map((s) => ({
+        id: s.id,
+        name: s.name,
+        scheduledDate: s.scheduledDate || '',
+        status: s.status,
+        shortlistDocPath: s.shortlistDocPath ?? null,
+        shortlistDocTitle: s.shortlistDocTitle ?? null,
+        attachmentPath: s.attachmentPath ?? null,
+        notes: s.notes ?? null,
+    }));
+
+    const onPipelineStageHeaderClick = (stageId: string) => {
+        setSelectedStageId((prev) => (prev === stageId ? null : stageId));
+    };
+
     return (
-        <div className="p-4 sm:p-6 lg:p-8 max-w-full" data-testid="job-details-page">
-            {/* Back + Header */}
-            <button onClick={() => navigate('/jobs-management')} className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-500 hover:text-primary-600 mb-6 transition-colors">
-                <ArrowLeft className="w-4 h-4" /> Back to Jobs
+        <div
+            className={clsx(
+                'w-full',
+                embedded
+                    ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden bg-slate-50/80 p-3 sm:p-4'
+                    : 'mx-auto max-w-[1600px] p-4 sm:p-6 lg:p-8'
+            )}
+            data-testid="job-details-page"
+        >
+            <button
+                type="button"
+                onClick={() => (embedded && onClose ? onClose() : navigate('/jobs-management'))}
+                className={clsx(
+                    'mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-gray-500 transition-colors hover:text-primary-600 sm:mb-5',
+                    embedded && 'shrink-0'
+                )}
+            >
+                <ArrowLeft className="h-4 w-4" /> {embedded ? 'Back to job list' : 'Back to jobs'}
             </button>
 
-            <div className="flex flex-col lg:flex-row lg:items-start gap-6 mb-8">
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 sm:p-8 mb-8">
+                <div className="flex flex-col lg:flex-row lg:items-start gap-6">
                 {/* Job Info Header */}
                 <div className="flex-1">
                     <div className="flex items-start gap-4 mb-3">
@@ -862,6 +990,7 @@ export default function JobDetails() {
                         </span>
                     </div>
                 </div>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -908,10 +1037,7 @@ export default function JobDetails() {
 
                             {/* Bulk actions bar */}
                             {selectedStudents.length > 0 && (
-                                <motion.div
-                                    initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                                    className="mt-4 bg-primary-50 border border-primary-200 rounded-xl px-4 py-3 space-y-2"
-                                >
+                                <div className="mt-4 space-y-2 rounded-xl border border-primary-200 bg-primary-50 px-4 py-3">
                                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                         <span className="text-sm font-bold text-primary-700">{selectedStudents.length} student(s) selected</span>
                                         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -951,7 +1077,7 @@ export default function JobDetails() {
                                     )}
                                     {bulkActionError && <p className="text-xs font-semibold text-red-700">{bulkActionError}</p>}
                                     {bulkActionMsg && <p className="text-xs font-semibold text-emerald-700">{bulkActionMsg}</p>}
-                                </motion.div>
+                                </div>
                             )}
                         </div>
 
@@ -1030,8 +1156,8 @@ export default function JobDetails() {
                                                         </td>
                                                     )}
                                                     <td className="px-4 py-3.5 text-right">
-                                                        {isPlacedStatus(app.status) ? (
-                                                            <div className="inline-flex flex-wrap items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                                                        <div className="inline-flex flex-wrap items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                                                            {isPlacedStatus(app.status) && (
                                                                 <button
                                                                     type="button"
                                                                     disabled={rowActionLoading === app.student.id}
@@ -1040,19 +1166,20 @@ export default function JobDetails() {
                                                                 >
                                                                     <Unlock className="w-3 h-3" /> Unplace
                                                                 </button>
-                                                                <button onClick={(e) => openLockModal(app.student.id, !!app.student.isLocked, e)}
-                                                                    className={clsx(
-                                                                        "inline-flex items-center gap-1 text-xs font-bold border px-3 py-1.5 rounded-lg transition-colors",
-                                                                        app.student.isLocked
-                                                                            ? "text-emerald-700 hover:text-emerald-800 border-emerald-200 bg-emerald-50 hover:bg-emerald-100"
-                                                                            : "text-red-600 hover:text-red-800 border-red-200 bg-red-50 hover:bg-red-100"
-                                                                    )}>
-                                                                    <Lock className="w-3 h-3" /> {app.student.isLocked ? 'Unlock Profile' : 'Lock Profile'}
-                                                                </button>
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-xs text-gray-400">—</span>
-                                                        )}
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => openLockModal(app.student.id, !!app.student.isLocked, e)}
+                                                                className={clsx(
+                                                                    "inline-flex items-center gap-1 text-xs font-bold border px-3 py-1.5 rounded-lg transition-colors",
+                                                                    app.student.isLocked
+                                                                        ? "text-emerald-700 hover:text-emerald-800 border-emerald-200 bg-emerald-50 hover:bg-emerald-100"
+                                                                        : "text-red-600 hover:text-red-800 border-red-200 bg-red-50 hover:bg-red-100"
+                                                                )}
+                                                            >
+                                                                <Lock className="w-3 h-3" /> {app.student.isLocked ? 'Unlock Profile' : 'Lock Profile'}
+                                                            </button>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                             );
@@ -1063,122 +1190,28 @@ export default function JobDetails() {
                                 )}
                             </div>
 
-                            {hasPipelineStages && !selectedStageObj && (
-                                <div className="border-t border-gray-100 px-2 pb-4 pt-4 mt-2" data-testid="applicants-kanban">
-                                    <h3 className="text-sm font-bold text-gray-900 mb-1 px-2">By timeline stage</h3>
-                                    <p className="text-xs text-gray-500 mb-3 px-2">
-                                        Only stages with students are listed. Use ↑ / ↓ to move between stages. Drop removes the student from that timeline stage only — they remain in All applicants above (not rejected).
-                                    </p>
-                                    {timelineStagesWithStudents.length === 0 ? (
-                                        <p className="text-sm text-gray-500 px-2 py-4 text-center border border-dashed border-gray-200 rounded-xl bg-gray-50/50">
-                                            No students are assigned to a timeline stage yet.
-                                        </p>
-                                    ) : (
-                                    <div className="space-y-2">
-                                        {timelineStagesWithStudents.map(({ stage, colIdx }) => {
-                                            const inColumn = sortedApps.filter(
-                                                (a) => columnIndexForApplicant(a, orderedTimeline) === colIdx
-                                            );
-                                            const open = !!expandedStageIds[stage.id];
-                                            return (
-                                                <div
-                                                    key={stage.id}
-                                                    className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm"
-                                                    data-testid={`stage-column-${stage.id}`}
-                                                >
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => toggleStagePanel(stage.id)}
-                                                        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                                                    >
-                                                        <span className="font-bold text-gray-900" data-testid="timeline-stage-title">
-                                                            {stage.name}
-                                                        </span>
-                                                        <span className="text-xs text-gray-500 tabular-nums">{inColumn.length} student{inColumn.length !== 1 ? 's' : ''}</span>
-                                                        <ChevronDown className={clsx('w-5 h-5 text-gray-400 shrink-0 transition-transform', open && 'rotate-180')} />
-                                                    </button>
-                                                    {open && (
-                                                        <div className="border-t border-gray-100 bg-gray-50/60 p-3 space-y-2">
-                                                            {inColumn.map((app) => {
-                                                                    const idx = columnIndexForApplicant(app, orderedTimeline);
-                                                                    const busy = rowActionLoading === app.student.id;
-                                                                    const placed = isPlacedStatus(app.status);
-                                                                    return (
-                                                                        <div
-                                                                            key={app.id}
-                                                                            className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-100 bg-white p-3 shadow-sm"
-                                                                            data-testid="applicant-row"
-                                                                        >
-                                                                            <div className="flex items-center gap-0.5 border-r border-gray-100 pr-2 mr-1">
-                                                                                <button
-                                                                                    type="button"
-                                                                                    title={idx <= 0 ? 'Unassign from timeline stages' : 'Move to previous stage'}
-                                                                                    disabled={busy || placed || idx < 0}
-                                                                                    onClick={() => moveOneStudent(app.student.id, 'prev')}
-                                                                                    className="p-1.5 rounded-md hover:bg-gray-100 text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
-                                                                                >
-                                                                                    <ChevronUp className="w-5 h-5" />
-                                                                                </button>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    title="Move to next stage"
-                                                                                    disabled={busy || placed || idx >= finalStageIndex}
-                                                                                    onClick={() => moveOneStudent(app.student.id, 'next')}
-                                                                                    className="p-1.5 rounded-md hover:bg-gray-100 text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
-                                                                                >
-                                                                                    <ChevronDown className="w-5 h-5" />
-                                                                                </button>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    title="Unassign from timeline stages"
-                                                                                    disabled={busy || placed}
-                                                                                    onClick={() => dropOneStudent(app.student.id)}
-                                                                                    className="p-1.5 rounded-md hover:bg-red-50 text-red-600 disabled:opacity-30 disabled:cursor-not-allowed"
-                                                                                >
-                                                                                    <UserMinus className="w-5 h-5" />
-                                                                                </button>
-                                                                            </div>
-                                                                            <div className="flex-1 min-w-[140px]">
-                                                                                <p className="text-sm font-bold text-gray-900">
-                                                                                    {app.student.firstName} {app.student.lastName}
-                                                                                </p>
-                                                                                <p className="text-xs text-gray-500">{app.student.scholarNo}</p>
-                                                                            </div>
-                                                                            {placed && (
-                                                                                <div className="flex flex-wrap items-center gap-2">
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        disabled={busy}
-                                                                                        onClick={(e) => unplaceOneStudent(app.student.id, e)}
-                                                                                        className="inline-flex items-center gap-1 text-xs font-bold border border-amber-200 bg-amber-50 text-amber-900 px-2 py-1 rounded-lg hover:bg-amber-100 disabled:opacity-60"
-                                                                                    >
-                                                                                        <Unlock className="w-3 h-3" /> Unplace
-                                                                                    </button>
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={(e) => openLockModal(app.student.id, !!app.student.isLocked, e)}
-                                                                                        className={clsx(
-                                                                                            'inline-flex items-center gap-1 text-xs font-bold border px-2 py-1 rounded-lg',
-                                                                                            app.student.isLocked
-                                                                                                ? 'text-emerald-700 border-emerald-200 bg-emerald-50'
-                                                                                                : 'text-red-600 border-red-200 bg-red-50'
-                                                                                        )}
-                                                                                    >
-                                                                                        <Lock className="w-3 h-3" /> {app.student.isLocked ? 'Unlock' : 'Lock'}
-                                                                                    </button>
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    );
-                                                                })}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                    )}
-                                </div>
+                            {hasPipelineStages && (
+                                <ApplicantPipeline
+                                    columns={pipelineColumns}
+                                    orderedTimeline={pipelineOrderedStages}
+                                    selectedStageId={selectedStageId}
+                                    onStageHeaderClick={onPipelineStageHeaderClick}
+                                    selectedStudentIds={selectedStudents}
+                                    onToggleStudent={toggleStudent}
+                                    rowActionLoading={rowActionLoading}
+                                    isPlaced={isPlacedStatus}
+                                    finalStageIndex={finalStageIndex}
+                                    columnIndexForApplicant={columnIndexForApplicant}
+                                    moveOneStudent={moveOneStudent}
+                                    dropOneStudent={dropOneStudent}
+                                    unplaceOneStudent={unplaceOneStudent}
+                                    openLockModal={openLockModal}
+                                    onUploadShortlistDoc={uploadStageShortlistDoc}
+                                    onRemoveShortlistDoc={removeStageShortlistDoc}
+                                    uploadingStageId={shortlistUploadingId}
+                                    shortlistError={shortlistError || undefined}
+                                    shortlistMessage={shortlistMessage || undefined}
+                                />
                             )}
 
                             {!hasPipelineStages && filteredApps.length > 0 && (
@@ -1281,8 +1314,8 @@ export default function JobDetails() {
                                                         selectedStudents.includes(app.student.id) ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
                                                     {selectedStudents.includes(app.student.id) ? '✓ Selected' : 'Select'}
                                                 </button>
-                                                {isPlacedStatus(app.status) ? (
-                                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                                    {isPlacedStatus(app.status) && (
                                                         <button
                                                             type="button"
                                                             disabled={rowActionLoading === app.student.id}
@@ -1291,19 +1324,20 @@ export default function JobDetails() {
                                                         >
                                                             <Unlock className="w-3 h-3" /> Unplace
                                                         </button>
-                                                        <button onClick={(e) => openLockModal(app.student.id, !!app.student.isLocked, e)}
-                                                            className={clsx(
-                                                                "text-xs font-bold border px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1",
-                                                                app.student.isLocked
-                                                                    ? "text-emerald-700 hover:text-emerald-800 border-emerald-200 bg-emerald-50 hover:bg-emerald-100"
-                                                                    : "text-red-600 hover:text-red-800 border-red-200 bg-red-50 hover:bg-red-100"
-                                                            )}>
-                                                            <Lock className="w-3 h-3" /> {app.student.isLocked ? 'Unlock Profile' : 'Lock Profile'}
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-xs text-gray-400">—</span>
-                                                )}
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => openLockModal(app.student.id, !!app.student.isLocked, e)}
+                                                        className={clsx(
+                                                            "text-xs font-bold border px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1",
+                                                            app.student.isLocked
+                                                                ? "text-emerald-700 hover:text-emerald-800 border-emerald-200 bg-emerald-50 hover:bg-emerald-100"
+                                                                : "text-red-600 hover:text-red-800 border-red-200 bg-red-50 hover:bg-red-100"
+                                                        )}
+                                                    >
+                                                        <Lock className="w-3 h-3" /> {app.student.isLocked ? 'Unlock Profile' : 'Lock Profile'}
+                                                    </button>
+                                                </div>
                                             </div>
                                         </motion.div>
                                     );
@@ -1611,7 +1645,7 @@ export default function JobDetails() {
                                                                     className="text-[11px] font-bold text-primary-700 hover:underline"
                                                                     onClick={(e) => e.stopPropagation()}
                                                                 >
-                                                                    View shortlist file
+                                                                    {stage.shortlistDocTitle?.trim() || 'View shortlist PDF'}
                                                                 </a>
                                                             )}
                                                         </div>

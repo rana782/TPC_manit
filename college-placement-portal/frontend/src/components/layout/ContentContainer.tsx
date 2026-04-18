@@ -1,19 +1,17 @@
 import { clsx } from 'clsx';
+import { LayoutContainer } from './PageHeader';
 
 interface ContentContainerProps {
     children: React.ReactNode;
     className?: string;
+    contained?: boolean;
 }
 
-export default function ContentContainer({ children, className }: ContentContainerProps) {
-    return (
-        <div
-            className={clsx(
-                'flex-1 overflow-y-auto p-6 lg:p-8',
-                className
-            )}
-        >
-            {children}
-        </div>
-    );
+/** Optional content wrapper — AppLayout main already applies page padding. */
+export default function ContentContainer({ children, className, contained = true }: ContentContainerProps) {
+    const body = <div className={clsx('w-full', className)}>{children}</div>;
+    if (contained) {
+        return <LayoutContainer>{body}</LayoutContainer>;
+    }
+    return body;
 }

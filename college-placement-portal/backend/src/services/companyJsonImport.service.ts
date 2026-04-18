@@ -89,9 +89,11 @@ async function loadCompaniesJson(): Promise<LoadResult> {
 
   candidatePaths.push(
     path.join(backendRoot, '..', MERGED_COMPANIES_FILENAME),
+    path.join(backendRoot, MERGED_COMPANIES_FILENAME),
     path.join(backendRoot, 'data', MERGED_COMPANIES_FILENAME),
     path.join(cwd, MERGED_COMPANIES_FILENAME),
     path.join(cwd, '..', MERGED_COMPANIES_FILENAME),
+    path.join(cwd, '..', '..', MERGED_COMPANIES_FILENAME),
     path.join(backendRoot, 'data', 'companies.json')
   );
 
@@ -226,12 +228,30 @@ export async function ensureCompanyProfilesImported(prisma: PrismaClient): Promi
   if (process.env.SKIP_AUTO_COMPANY_IMPORT === '1' || process.env.SKIP_AUTO_COMPANY_IMPORT === 'true') {
     return;
   }
+  const forceReimport =
+    process.env.FORCE_COMPANY_JSON_REIMPORT === '1' ||
+    String(process.env.FORCE_COMPANY_JSON_REIMPORT || '').toLowerCase() === 'true';
   const hasJsonImport =
     (await prisma.companyProfile.findFirst({ where: { source: 'json_import' }, select: { id: true } })) != null;
-  if (hasJsonImport) return;
 
-  const n = await prisma.companyProfile.count();
-  if (n > 0) {
+  const { rows: sourceRows, filePath } = await loadCompaniesJson();
+  const expectedFromJson = sourceRows.length;
+  const currentCount = await prisma.companyProfile.count();
+
+  // If merged JSON has far more rows than DB, import again even when json_import rows exist.
+  // This fixes stale partial imports (e.g., old tiny dataset imported once, full merged file ignored later).
+  const looksUnderImported =
+    expectedFromJson >= 100 && currentCount < Math.floor(expectedFromJson * 0.6);
+
+  if (hasJsonImport && !forceReimport && !looksUnderImported) return;
+
+  if (hasJsonImport && looksUnderImported) {
+    logger.warn(
+      `Detected partial company profile import: db=${currentCount}, json=${expectedFromJson} (${filePath ?? 'unknown'}). Re-importing merged dataset...`
+    );
+  }
+
+  if (currentCount > 0) {
     logger.warn(
       `Company profiles exist but JSON dataset not imported; importing ${MERGED_COMPANIES_FILENAME} (or fallback companies.json) in the background (may take 1–2 minutes)...`
     );

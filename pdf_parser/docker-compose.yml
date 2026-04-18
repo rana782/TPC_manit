@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: doc_intel
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d doc_intel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  upload:
+    build:
+      context: ./services/upload_service
+    # Named volumes on Docker Desktop are often root-owned; non-root appuser cannot mkdir under /data/uploads.
+    user: "0:0"
+    environment:
+      STORAGE_ROOT: /data/uploads
+      JOB_SERVICE_BASE_URL: http://job:8004
+      ENABLE_JOB_REGISTRATION: "true"
+      ENABLE_EXTRACTION_FORWARD: "false"
+      INTERNAL_SERVICE_TOKEN: change-me-internal-token
+    volumes:
+      - upload_data:/data/uploads
+    ports:
+      - "8001:8001"
+
+  extraction:
+    build:
+      context: ./services/extraction_service
+    environment:
+      NANONETS_API_KEY: ${NANONETS_API_KEY}
+      NANONETS_BASE_URL: https://extraction-api.nanonets.com
+    ports:
+      - "8002:8002"
+
+  normalization:
+    build:
+      context: ./services/normalization_service
+    ports:
+      - "8003:8003"
+
+  job:
+    build:
+      context: ./services/job_service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/doc_intel
+      INTERNAL_SERVICE_TOKEN: change-me-internal-token
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8004:8004"
+
+  worker:
+    build:
+      context: ./services/worker
+    environment:
+      JOB_SERVICE_BASE_URL: http://job:8004
+      UPLOAD_SERVICE_BASE_URL: http://upload:8001
+      EXTRACTION_SERVICE_BASE_URL: http://extraction:8002
+      NORMALIZATION_SERVICE_BASE_URL: http://normalization:8003
+      INTERNAL_SERVICE_TOKEN: change-me-internal-token
+      POLL_INTERVAL_SECONDS: "1.5"
+    depends_on:
+      - upload
+      - extraction
+      - normalization
+      - job
+
+  gateway:
+    build:
+      context: ./services/api_gateway
+    environment:
+      UPLOAD_SERVICE_BASE_URL: http://upload:8001
+      JOB_SERVICE_BASE_URL: http://job:8004
+    depends_on:
+      - upload
+      - job
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
+  upload_data:

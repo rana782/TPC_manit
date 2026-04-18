@@ -412,6 +412,9 @@ async function main() {
         'Permanent demo (additive, not removed on re-seed): permdemo.student01..50@example.com, permdemo.alumni001..100@example.com, jobs with [permdemo] in description.'
     );
     console.log('SPOC-seeded jobs are PUBLISHED with deadlines ~6 months ahead (visible on Job Board).');
+    console.log(
+        'Supabase baseline (50 companies, 100+100 students, 200 alumni): runs once on API boot (see AUTO_BASELINE_SEED) or run: npm run seed:baseline'
+    );
 }
 
 main()

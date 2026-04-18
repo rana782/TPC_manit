@@ -1,0 +1,46 @@
+# Logical relational model for job/persistence service (PostgreSQL)
+version: 1
+tables:
+  documents:
+    description: Uploaded artifact identity and storage pointers; optional portal user_id.
+    primary_key: [document_id]
+    columns:
+      document_id: { type: uuid }
+      user_id: { type: string, nullable: true, index: true }
+      storage_relative_path: { type: text }
+      stored_filename: { type: text }
+      content_type: { type: text }
+      created_at: { type: timestamptz }
+      updated_at: { type: timestamptz }
+
+  jobs:
+    description: >-
+      One processing run. States: queued -> processing -> completed | failed.
+      Failed jobs may be re-queued via internal retry (bounded by max_job_retries).
+    primary_key: [job_id]
+    foreign_keys:
+      - { columns: [document_id], references: documents.document_id, on_delete: cascade }
+    columns:
+      job_id: { type: uuid }
+      document_id: { type: uuid, index: true }
+      status: { type: string, index: true, notes: queued | processing | completed | failed }
+      retry_count: { type: integer, default: 0 }
+      error_message: { type: text, nullable: true }
+      created_at: { type: timestamptz }
+      updated_at: { type: timestamptz }
+
+  results:
+    description: Persisted extraction + normalization outputs for a job.
+    primary_key: [result_id]
+    foreign_keys:
+      - { columns: [job_id], references: jobs.job_id, on_delete: cascade, unique: true }
+      - { columns: [document_id], references: documents.document_id, on_delete: cascade }
+    columns:
+      result_id: { type: uuid }
+      job_id: { type: uuid, unique: true, index: true }
+      document_id: { type: uuid, index: true }
+      extracted_text: { type: text, nullable: true }
+      nanonets_raw: { type: jsonb, nullable: true }
+      normalized_output: { type: jsonb, nullable: true }
+      created_at: { type: timestamptz }
+      updated_at: { type: timestamptz }

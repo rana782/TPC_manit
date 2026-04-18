@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { createJob, listJobs, getJob, updateJob, deleteJob, exportApplicantsCsv, addOrUpdateStage, updateJobStage, deleteJobStage, uploadStageShortlistDoc, uploadStageShortlistAndMap, advanceStage, regressStage, dropApplicants, declareResults, getStudentJobDetails } from '../controllers/job.controller';
+import { createJob, listJobs, getJob, updateJob, deleteJob, exportApplicantsCsv, addOrUpdateStage, updateJobStage, deleteJobStage, uploadStageShortlistDoc, deleteStageShortlistDoc, advanceStage, regressStage, dropApplicants, declareResults, getStudentJobDetails } from '../controllers/job.controller';
 import { verifyToken, requireRole } from '../middlewares/auth.middleware';
-import { uploadDocument, uploadJobDocs, uploadShortlist } from '../middlewares/upload.middleware';
+import { uploadDocument, uploadJobDocs } from '../middlewares/upload.middleware';
 
 const router = Router();
 
@@ -27,7 +27,7 @@ router.patch('/:id/stage', requireRole(['SPOC', 'COORDINATOR']), uploadDocument.
 router.patch('/:id/stages/:stageId', requireRole(['SPOC', 'COORDINATOR']), uploadDocument.single('stageAttachment'), updateJobStage);
 router.delete('/:id/stages/:stageId', requireRole(['SPOC', 'COORDINATOR']), deleteJobStage);
 router.patch('/:id/stages/:stageId/shortlist-doc', requireRole(['SPOC', 'COORDINATOR']), uploadDocument.single('shortlistDoc'), uploadStageShortlistDoc);
-router.post('/:id/stages/:stageId/upload-shortlist', requireRole(['SPOC', 'COORDINATOR']), uploadShortlist.single('shortlistFile'), uploadStageShortlistAndMap);
+router.delete('/:id/stages/:stageId/shortlist-doc', requireRole(['SPOC', 'COORDINATOR']), deleteStageShortlistDoc);
 router.patch('/:id/advance-stage', requireRole(['SPOC', 'COORDINATOR']), advanceStage);
 router.patch('/:id/regress-stage', requireRole(['SPOC', 'COORDINATOR']), regressStage);
 router.patch('/:id/drop-applicants', requireRole(['SPOC', 'COORDINATOR']), dropApplicants);
