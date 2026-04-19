@@ -44,15 +44,15 @@ function ResumeDocumentPreview({
     resume: r,
     apiOrigin,
     height,
-    broken,
-    setBroken,
 }: {
     resume: Resume;
     apiOrigin: string;
     height: number;
-    broken: Record<string, boolean>;
-    setBroken: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
 }) {
+    const [imageLoadFailed, setImageLoadFailed] = useState(false);
+    useEffect(() => {
+        setImageLoadFailed(false);
+    }, [r.id, r.fileUrl]);
     const fileLower = (r.fileUrl || '').toLowerCase();
     const isPdf = fileLower.endsWith('.pdf');
     const isImage = /\.(png|jpe?g|webp)$/.test(fileLower);
@@ -79,7 +79,7 @@ function ResumeDocumentPreview({
     }
 
     if (isImage) {
-        return broken[r.id] ? (
+        return imageLoadFailed ? (
             <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
                 <FileText className="mb-3 h-10 w-10 text-slate-300" aria-hidden />
                 <p className="text-sm font-semibold text-slate-600">Preview unavailable</p>
@@ -90,7 +90,10 @@ function ResumeDocumentPreview({
                 alt={`Resume: ${r.fileName}`}
                 className="h-full w-full object-contain bg-slate-50"
                 style={{ maxHeight: height }}
-                onError={() => setBroken((prev) => ({ ...prev, [r.id]: true }))}
+                onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                    setImageLoadFailed(true);
+                }}
             />
         );
     }
@@ -106,11 +109,13 @@ function ResumeDocumentPreview({
 function AtsAnalysisPanel({
     resumeId,
     analyzingResumeId,
+    analysisElapsed,
     onAnalyze,
     analysisByResume,
 }: {
     resumeId: string;
     analyzingResumeId: string | null;
+    analysisElapsed: number;
     onAnalyze: (id: string) => void;
     analysisByResume: Record<string, AtsAnalysisResult | null>;
 }) {
@@ -120,7 +125,7 @@ function AtsAnalysisPanel({
             className="rounded-2xl border border-violet-200/80 bg-gradient-to-br from-violet-50/90 via-white to-white p-5 shadow-sm"
             data-testid="resume-ats-section"
         >
-            <div className="flex flex-col gap-4 border-b border-violet-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex flex-col gap-4 border-b border-violet-100 pb-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
                 <div>
                     <p className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-violet-900">
                         <Sparkles className="h-4 w-4 shrink-0" aria-hidden />
@@ -150,6 +155,11 @@ function AtsAnalysisPanel({
                         </>
                     )}
                 </button>
+                {analyzingResumeId === resumeId && (
+                    <p className="basis-full text-xs text-slate-500 mt-1 sm:order-last">
+                        Analyzing... {analysisElapsed}s{analysisElapsed > 30 ? ' (this may take up to 3 min)' : ''}
+                    </p>
+                )}
             </div>
             {result && (
                 <div
@@ -316,15 +326,21 @@ export default function ResumePage() {
     const [roleName, setRoleName] = useState('');
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
-    const [resumePreviewBroken, setResumePreviewBroken] = useState<Record<string, boolean>>({});
     const [dragOver, setDragOver] = useState(false);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [analysisByResume, setAnalysisByResume] = useState<Record<string, AtsAnalysisResult | null>>({});
     const [analyzingResumeId, setAnalyzingResumeId] = useState<string | null>(null);
+    const [analysisElapsed, setAnalysisElapsed] = useState(0);
+    const analysisTimerRef = useRef<number | null>(null);
 
     const headers = { Authorization: `Bearer ${token}` };
-    const clearMessages = () => { setTimeout(() => { setSuccess(''); setError(''); }, 3000); };
+    const clearMessages = (isError = false) => {
+        setTimeout(() => {
+            setSuccess('');
+            setError('');
+        }, isError ? 8000 : 3000);
+    };
 
     const fetchResumes = async () => {
         try {
@@ -332,6 +348,7 @@ export default function ResumePage() {
             setResumes(res.data.data || []);
         } catch (err: any) {
             setError(err.response?.data?.message || 'Failed to fetch resumes.');
+            clearMessages(true);
         } finally {
             setLoading(false);
         }
@@ -355,6 +372,10 @@ export default function ResumePage() {
         setError('');
         setSuccess('');
         setAnalyzingResumeId(resumeId);
+        setAnalysisElapsed(0);
+        analysisTimerRef.current = window.setInterval(() => {
+            setAnalysisElapsed((prev) => prev + 1);
+        }, 1000);
         try {
             const res = await axios.post(
                 `${API}/api/ats/score-absolute`,
@@ -380,6 +401,7 @@ export default function ResumePage() {
                 clearMessages();
             } else {
                 setError(res.data?.message || 'Analysis failed.');
+                clearMessages(true);
             }
         } catch (err: any) {
             if (err?.code === 'ECONNABORTED') {
@@ -387,13 +409,16 @@ export default function ResumePage() {
             } else {
                 setError(err.response?.data?.message || 'Could not analyze resume. Try again.');
             }
+            clearMessages(true);
         } finally {
+            if (analysisTimerRef.current) {
+                window.clearInterval(analysisTimerRef.current);
+                analysisTimerRef.current = null;
+            }
+            setAnalysisElapsed(0);
             setAnalyzingResumeId(null);
         }
     };
-
-    // Reset broken-image fallback when the resume list updates (e.g., after upload)
-    useEffect(() => { setResumePreviewBroken({}); }, [resumes]);
 
     const handleUpload = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
@@ -416,6 +441,7 @@ export default function ResumePage() {
             clearMessages();
         } catch (err: any) {
             setError(err.response?.data?.message || 'Failed to upload. PDF only, max 5MB.');
+            clearMessages(true);
         } finally {
             setUploading(false);
         }
@@ -430,6 +456,7 @@ export default function ResumePage() {
             clearMessages();
         } catch (err: any) {
             setError(err.response?.data?.message || 'Delete failed.');
+            clearMessages(true);
         }
     };
 
@@ -437,7 +464,10 @@ export default function ResumePage() {
         try {
             const res = await axios.put(`${API}/api/student/resume/${id}/active`, {}, { headers });
             setResumes(prev => prev.map(r => r.id === id ? { ...r, isActive: res.data.data.isActive } : r));
-        } catch { setError('Failed to update resume status.'); }
+        } catch {
+            setError('Failed to update resume status.');
+            clearMessages(true);
+        }
     };
 
     const handleDrop = useCallback((e: React.DragEvent) => {
@@ -447,7 +477,7 @@ export default function ResumePage() {
             setFile(droppedFile);
         } else {
             setError('Only PDF files are accepted.');
-            clearMessages();
+            clearMessages(true);
         }
     }, []);
 
@@ -502,7 +532,17 @@ export default function ResumePage() {
                         role="alert"
                     >
                         <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
-                        {error}
+                        <span className="min-w-0 flex-1">{error}</span>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setError('');
+                                fetchResumes();
+                            }}
+                            className="ml-3 text-xs font-semibold text-red-700 underline hover:no-underline"
+                        >
+                            Retry
+                        </button>
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -819,8 +859,6 @@ export default function ResumePage() {
                                         resume={selectedResume}
                                         apiOrigin={API}
                                         height={detailPreviewHeight}
-                                        broken={resumePreviewBroken}
-                                        setBroken={setResumePreviewBroken}
                                     />
                                 </div>
                             </div>
@@ -828,6 +866,7 @@ export default function ResumePage() {
                             <AtsAnalysisPanel
                                 resumeId={selectedResume.id}
                                 analyzingResumeId={analyzingResumeId}
+                                analysisElapsed={analysisElapsed}
                                 onAnalyze={handleAnalyzeResume}
                                 analysisByResume={analysisByResume}
                             />

@@ -116,8 +116,8 @@ function DashboardSkeleton() {
                 <div className="h-9 max-w-md animate-pulse rounded-lg bg-slate-200" />
                 <div className="h-4 max-w-lg animate-pulse rounded-md bg-slate-100" />
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-5">
-                {[0, 1, 2].map((k) => (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 sm:gap-5">
+                {[0, 1, 2, 3].map((k) => (
                     <div
                         key={k}
                         className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"
@@ -179,7 +179,9 @@ export default function StudentDashboard() {
 
     useEffect(() => {
         if (!token) return;
-        const intervalId = window.setInterval(() => { void refreshDashboard(); }, 15000);
+        const intervalId = window.setInterval(() => {
+            if (document.visibilityState === 'visible') void refreshDashboard();
+        }, 60000);
         const onVisibility = () => {
             if (document.visibilityState === 'visible') void refreshDashboard();
         };
@@ -235,6 +237,30 @@ export default function StudentDashboard() {
             iconWrap: 'bg-amber-50 text-amber-800 ring-1 ring-amber-100',
             accent: 'bg-gradient-to-r from-amber-500 to-orange-500',
         },
+        {
+            label: 'Shortlisted',
+            value: `${dashboardStats?.shortlisted ?? applications.filter(a => {
+                const s = a.status?.toUpperCase() || '';
+                return s.includes('SHORTLIST') || s.includes('INTERVIEW');
+            }).length}`,
+            icon: Users,
+            cardClass: 'border-slate-200/90 bg-white',
+            iconWrap: 'bg-violet-50 text-violet-700 ring-1 ring-violet-100',
+            accent: 'bg-gradient-to-r from-violet-500 to-purple-600',
+        },
+        {
+            label: 'Placed',
+            value: dashboardStats?.placed != null
+                ? `${dashboardStats.placed}`
+                : applications.some(a => {
+                    const s = a.status?.toUpperCase() || '';
+                    return s.includes('PLACED') || s.includes('ACCEPT') || s.includes('OFFER') || s === 'SELECTED';
+                }) ? '✓' : '—',
+            icon: CheckCircle2,
+            cardClass: 'border-slate-200/90 bg-white',
+            iconWrap: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100',
+            accent: 'bg-gradient-to-r from-emerald-500 to-teal-600',
+        },
     ];
 
     const recentApps = applications.slice(0, 5);
@@ -269,7 +295,7 @@ export default function StudentDashboard() {
                         breadcrumbs={[{ label: 'Dashboard' }]}
                     />
 
-                    <section aria-label="Placement summary" className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
+                    <section aria-label="Placement summary" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 sm:gap-5">
                         {stats.map((stat) => {
                             const Icon = stat.icon;
                             return (

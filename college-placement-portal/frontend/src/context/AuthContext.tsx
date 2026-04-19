@@ -5,6 +5,7 @@ import { getViteApiOrigin } from '../utils/apiBase';
 interface User {
     id: string;
     email: string;
+    name?: string;
     role: string;
     isVerified?: boolean;
     verifiedAt?: string | null;

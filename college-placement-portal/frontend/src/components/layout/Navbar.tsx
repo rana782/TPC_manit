@@ -55,6 +55,13 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
                 .then((res) => {
                     if (res.data?.success && Array.isArray(res.data.notifications)) {
                         setNotifications(res.data.notifications);
+                        axios
+                            .patch(
+                                apiOrigin ? `${apiOrigin}/api/notifications/read-all` : '/api/notifications/read-all',
+                                {},
+                                { headers: { Authorization: `Bearer ${token}` } }
+                            )
+                            .catch(() => {});
                     }
                 })
                 .catch(() => {});
@@ -67,7 +74,7 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
         navigate('/login');
     };
 
-    const initials = user?.email?.charAt(0).toUpperCase() || 'U';
+    const initials = (user?.name?.charAt(0) || user?.email?.charAt(0) || 'U').toUpperCase();
     const unreadCount = notifications.filter((n) => !n.isRead).length;
 
     return (
@@ -131,7 +138,18 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
                                 className="absolute right-0 mt-2 w-[min(100vw-2rem,20rem)] rounded-xl border border-slate-200/90 bg-white py-1.5 shadow-lg sm:w-80"
                             >
                                 <div className="border-b border-slate-100 px-4 py-3">
-                                    <p className="text-sm font-semibold text-slate-900">Notifications</p>
+                                    <div className="flex justify-between">
+                                        <p className="text-sm font-semibold text-slate-900">Notifications</p>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+                                            }}
+                                            className="text-xs font-semibold text-primary-600 hover:text-primary-800 transition-colors"
+                                        >
+                                            Mark all read
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="max-h-80 overflow-y-auto">
                                     {notifications.length === 0 ? (
@@ -178,7 +196,7 @@ export default function Navbar({ onMenuClick, sidebarCollapsed, onSidebarToggle 
                         </div>
                         <div className="hidden text-left md:block">
                             <p className="max-w-[140px] truncate text-sm font-medium leading-tight text-slate-900">
-                                {user?.email}
+                                {user?.name || user?.email?.split('@')[0] || user?.email}
                             </p>
                             <p className="text-xs font-medium text-slate-500">{user?.role}</p>
                         </div>

@@ -21,6 +21,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import AnalyticsRedesignPage from './pages/AnalyticsRedesignPage';
 import AlumniDirectoryPage from './pages/AlumniDirectoryPage';
 import PlacedStudents from './pages/PlacedStudents';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 
 /** SPOC-only: coordinators must not access job CRUD UI (sidebar + deep links). */
 function JobsManagementRoute() {
@@ -42,31 +43,33 @@ function Home() {
 
 function App() {
     return (
-        <AuthProvider>
-            <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-                <Routes>
-                    {/* Public auth routes */}
-                    <Route path="/" element={<Home />} />
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/register" element={<Register />} />
-                    <Route path="/forgot-password" element={<ForgotPassword />} />
+        <ErrorBoundary>
+            <AuthProvider>
+                <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                    <Routes>
+                        {/* Public auth routes */}
+                        <Route path="/" element={<Home />} />
+                        <Route path="/login" element={<Login />} />
+                        <Route path="/register" element={<Register />} />
+                        <Route path="/forgot-password" element={<ForgotPassword />} />
 
-                    {/* Protected routes wrapped in AppLayout */}
-                    <Route element={<AppLayout />}>
-                        <Route path="/dashboard" element={<DashboardOrRedirect />} />
-                        <Route path="/profile" element={<Profile />} />
-                        <Route path="/resumes" element={<Resumes />} />
-                        <Route path="/jobs-management" element={<JobsManagementRoute />} />
-                        <Route path="/jobs/:id/details" element={<JobDetails />} />
-                        <Route path="/job-board" element={<JobBoard />} />
-                        <Route path="/admin" element={<AdminDashboard />} />
-                        <Route path="/analytics" element={<AnalyticsRedesignPage />} />
-                        <Route path="/alumni" element={<AlumniDirectoryPage />} />
-                        <Route path="/placed-students" element={<PlacedStudents />} />
-                    </Route>
-                </Routes>
-            </Router>
-        </AuthProvider>
+                        {/* Protected routes wrapped in AppLayout */}
+                        <Route element={<AppLayout />}>
+                            <Route path="/dashboard" element={<DashboardOrRedirect />} />
+                            <Route path="/profile" element={<Profile />} />
+                            <Route path="/resumes" element={<Resumes />} />
+                            <Route path="/jobs-management" element={<JobsManagementRoute />} />
+                            <Route path="/jobs/:id/details" element={<JobDetails />} />
+                            <Route path="/job-board" element={<JobBoard />} />
+                            <Route path="/admin" element={<AdminDashboard />} />
+                            <Route path="/analytics" element={<AnalyticsRedesignPage />} />
+                            <Route path="/alumni" element={<AlumniDirectoryPage />} />
+                            <Route path="/placed-students" element={<PlacedStudents />} />
+                        </Route>
+                    </Routes>
+                </Router>
+            </AuthProvider>
+        </ErrorBoundary>
     );
 }
 

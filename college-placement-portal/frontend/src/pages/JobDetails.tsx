@@ -251,11 +251,6 @@ export default function JobDetails({ jobId: jobIdProp, embedded, onClose }: JobD
     const [publishLoading, setPublishLoading] = useState(false);
     const [publishError, setPublishError] = useState('');
     const [publishMessage, setPublishMessage] = useState('');
-    const [whatsAppTemplate, setWhatsAppTemplate] = useState('');
-    const [whatsAppTouched, setWhatsAppTouched] = useState(false);
-    const [whatsAppPublishLoading, setWhatsAppPublishLoading] = useState(false);
-    const [whatsAppPublishError, setWhatsAppPublishError] = useState('');
-    const [whatsAppPublishMessage, setWhatsAppPublishMessage] = useState('');
     const [emailTemplate, setEmailTemplate] = useState('');
     const [emailTouched, setEmailTouched] = useState(false);
     const [emailPublishLoading, setEmailPublishLoading] = useState(false);
@@ -403,11 +398,6 @@ export default function JobDetails({ jobId: jobIdProp, embedded, onClose }: JobD
         return `🎉 Congratulations from TPC! 🎉\nWe're thrilled to share this update.\nThe following students have been placed at ${job.companyName}:\n${lines || '• (No placed students yet)'}\n#Placements #TPCC #PlacementDrive`;
     }, [job, placedStudentsForCompany]);
 
-    const generatedWhatsAppTemplate = useMemo(() => {
-        if (!job) return '';
-        return `We're thrilled to share this, {student_name}! 🎉 You are placed at ${job.companyName} for the role of ${job.role}. Please check the portal for next steps. - TPCC`;
-    }, [job]);
-
     const generatedEmailTemplate = useMemo(() => {
         if (!job) return '';
         return `We're thrilled to share this, {student_name}! 🎉 Congratulations on being placed at ${job.companyName} as ${job.role}. With a CTC of ${job.ctc || 'N/A'}, this achievement reflects your dedication and talent. Please send your acceptance at tpwnitb@gmail.com.`;
@@ -418,12 +408,6 @@ export default function JobDetails({ jobId: jobIdProp, embedded, onClose }: JobD
             setCaptionTemplate(generatedCongratsTemplate);
         }
     }, [generatedCongratsTemplate, captionTouched]);
-
-    useEffect(() => {
-        if (!whatsAppTouched) {
-            setWhatsAppTemplate(generatedWhatsAppTemplate);
-        }
-    }, [generatedWhatsAppTemplate, whatsAppTouched]);
 
     useEffect(() => {
         if (!emailTouched) {
@@ -459,37 +443,6 @@ export default function JobDetails({ jobId: jobIdProp, embedded, onClose }: JobD
             setPublishError(err.response?.data?.message || 'Failed to publish announcement');
         } finally {
             setPublishLoading(false);
-        }
-    };
-
-    const publishPlacedStudentsWhatsApp = async () => {
-        if (!id || !token) return;
-        if (!(user?.role === 'COORDINATOR' || user?.role === 'SPOC')) {
-            setWhatsAppPublishError('Only SPOC or coordinator can publish WhatsApp notifications.');
-            return;
-        }
-        if (!placedStudentsForCompany.length) {
-            setWhatsAppPublishError('No placed students found for this company yet.');
-            return;
-        }
-        if (!whatsAppTemplate.trim()) {
-            setWhatsAppPublishError('WhatsApp template cannot be empty.');
-            return;
-        }
-        setWhatsAppPublishLoading(true);
-        setWhatsAppPublishError('');
-        setWhatsAppPublishMessage('');
-        try {
-            const res = await axios.post(
-                `${apiBase}/notifications/job/${id}/publish-placed`,
-                { post_template: whatsAppTemplate.trim() },
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
-            setWhatsAppPublishMessage(res.data?.message || 'WhatsApp notifications published.');
-        } catch (err: any) {
-            setWhatsAppPublishError(err.response?.data?.message || 'Failed to publish WhatsApp notifications');
-        } finally {
-            setWhatsAppPublishLoading(false);
         }
     };
 
@@ -1473,54 +1426,6 @@ export default function JobDetails({ jobId: jobIdProp, embedded, onClose }: JobD
                             )}
                             {publishError && <p className="text-xs font-semibold text-red-700">{publishError}</p>}
                             {publishMessage && <p className="text-xs font-semibold text-emerald-700">{publishMessage}</p>}
-                        </div>
-
-                        <div className="mt-5 pt-5 border-t border-gray-100 space-y-2">
-                            <label className="text-xs font-bold text-gray-600 uppercase tracking-wide">Personal WhatsApp message template</label>
-                            <p className="text-xs text-gray-500">
-                                Use placeholders like <code>{'{student_name}'}</code>, <code>{'{company_name}'}</code>, <code>{'{role}'}</code>, <code>{'{status}'}</code>.
-                                This will be sent individually to each placed student.
-                            </p>
-                            <textarea
-                                rows={4}
-                                value={whatsAppTemplate}
-                                onChange={(e) => {
-                                    setWhatsAppTemplate(e.target.value);
-                                    setWhatsAppTouched(true);
-                                }}
-                                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/10 focus:outline-none"
-                                data-testid="whatsapp-caption-template"
-                            />
-                            <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setWhatsAppTemplate(generatedWhatsAppTemplate);
-                                        setWhatsAppTouched(false);
-                                        setWhatsAppPublishError('');
-                                    }}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-bold text-gray-700 hover:bg-gray-50"
-                                >
-                                    Reset WhatsApp Template
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={whatsAppPublishLoading || !placedStudentsForCompany.length || !(user?.role === 'COORDINATOR' || user?.role === 'SPOC')}
-                                    onClick={publishPlacedStudentsWhatsApp}
-                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-60"
-                                    data-testid="publish-whatsapp-btn"
-                                >
-                                    <MessageSquare className="w-3.5 h-3.5" />
-                                    {whatsAppPublishLoading ? 'Publishing...' : 'Publish to WhatsApp'}
-                                </button>
-                            </div>
-                            {!(user?.role === 'COORDINATOR' || user?.role === 'SPOC') && (
-                                <p className="text-xs text-amber-700">
-                                    Only SPOC or coordinator can publish WhatsApp notifications.
-                                </p>
-                            )}
-                            {whatsAppPublishError && <p className="text-xs font-semibold text-red-700">{whatsAppPublishError}</p>}
-                            {whatsAppPublishMessage && <p className="text-xs font-semibold text-emerald-700">{whatsAppPublishMessage}</p>}
                         </div>
 
                         <div className="mt-5 pt-5 border-t border-gray-100 space-y-2">

@@ -41,6 +41,7 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
             email: string;
             role: string;
             isDisabled: boolean;
+            disabledUntil: Date | null;
             isVerified: boolean;
             permJobCreate: boolean;
             permLockProfile: boolean;
@@ -51,6 +52,7 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
                 where: { id: decodedId },
                 select: {
                     id: true, email: true, role: true, isDisabled: true,
+                    disabledUntil: true,
                     isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
                 }
             });
@@ -60,6 +62,7 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
                 where: { email: decodedEmail },
                 select: {
                     id: true, email: true, role: true, isDisabled: true,
+                    disabledUntil: true,
                     isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
                 }
             });
@@ -70,7 +73,25 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
         }
 
         if (user.isDisabled) {
-            return res.status(403).json({ success: false, message: 'Account has been disabled. Please contact your coordinator.' });
+            const now = new Date();
+            if (user.disabledUntil && user.disabledUntil <= now) {
+                const reactivated = await prisma.user.update({
+                    where: { id: user.id },
+                    data: { isDisabled: false, disabledUntil: null },
+                    select: {
+                        id: true, email: true, role: true, isDisabled: true,
+                        isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
+                    }
+                });
+                user = { ...reactivated, disabledUntil: null };
+            } else {
+                return res.status(403).json({
+                    success: false,
+                    message: user.disabledUntil
+                        ? `Account is temporarily disabled until ${user.disabledUntil.toISOString()}.`
+                        : 'Account has been disabled. Please contact your coordinator.'
+                });
+            }
         }
 
         req.user = {

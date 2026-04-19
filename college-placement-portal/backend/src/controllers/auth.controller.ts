@@ -23,6 +23,7 @@ function toAuthUser(user: any) {
         id: user.id,
         email: user.email,
         role: user.role,
+        disabledUntil: user.disabledUntil ?? null,
         isVerified: user.isVerified,
         verifiedAt: user.verifiedAt ?? null,
         permJobCreate: !!user.permJobCreate,
@@ -268,7 +269,7 @@ export const login = async (req: Request, res: Response) => {
 
         const { email, password } = parsed.data;
 
-        const user = await findUserForLogin(email);
+        let user = await findUserForLogin(email);
         if (!user) {
             const demoOk = HARDCODED_LOGIN[email] === password;
             const msg =
@@ -276,6 +277,23 @@ export const login = async (req: Request, res: Response) => {
                     ? 'No account for this email in the database. From the backend folder run: npm run seed'
                     : 'Invalid email or password';
             return res.status(401).json({ success: false, message: msg });
+        }
+
+        if (user.isDisabled) {
+            const now = new Date();
+            if (user.disabledUntil && user.disabledUntil <= now) {
+                user = await prisma.user.update({
+                    where: { id: user.id },
+                    data: { isDisabled: false, disabledUntil: null },
+                });
+            } else {
+                return res.status(403).json({
+                    success: false,
+                    message: user.disabledUntil
+                        ? `Account is temporarily disabled until ${user.disabledUntil.toISOString()}.`
+                        : 'Account has been disabled. Please contact your coordinator.',
+                });
+            }
         }
 
         if (!user.isVerified) {

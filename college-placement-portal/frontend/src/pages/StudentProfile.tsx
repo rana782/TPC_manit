@@ -41,6 +41,7 @@ function FormField({
     onChange,
     onBlur,
     placeholder,
+    maxLength,
     error,
     hint,
 }: {
@@ -51,6 +52,7 @@ function FormField({
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
     placeholder?: string;
+    maxLength?: number;
     error?: string;
     hint?: string;
 }) {
@@ -74,6 +76,7 @@ function FormField({
                 onChange={onChange}
                 onBlur={onBlur}
                 placeholder={placeholder}
+                maxLength={maxLength}
                 aria-invalid={error ? 'true' : undefined}
                 aria-describedby={error ? errId : hint ? hintId : undefined}
                 className={clsx(inputBaseClass, error && 'border-red-400 focus:border-red-500 focus:ring-red-500/20')}
@@ -212,7 +215,17 @@ const currentYear = new Date().getFullYear();
 
 function validateScholar(value: string): string | undefined {
     if (!value) return undefined;
-    if (!/^\d{10}$/.test(value)) return 'Scholar number must contain exactly 10 digits';
+    if (!/^\d+$/.test(value)) return 'Scholar number must contain only digits';
+    if (value.length > 10) return 'Scholar number cannot exceed 10 digits';
+    if (value.length < 10) return 'Scholar number must contain exactly 10 digits';
+    return undefined;
+}
+
+function validatePhone(value: string): string | undefined {
+    if (!value) return undefined;
+    if (!/^\d+$/.test(value)) return 'Phone number must contain only digits';
+    if (value.length > 10) return 'Phone number cannot exceed 10 digits';
+    if (value.length < 10) return 'Phone number must contain exactly 10 digits';
     return undefined;
 }
 
@@ -410,11 +423,70 @@ export default function StudentProfile() {
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
-        // Scholar number: allow free editing (seed/demo values may be non-numeric like SCH-...). Validate 10 digits on blur/save.
-        if (name === 'scholarNo' && value.length > 32) return;
-        if (name === 'pincode' && value !== '' && !/^\d*$/.test(value)) return;
-        if (name === 'pincode' && value.length > 6) return;
-        setForm(f => ({ ...f, [name]: value }));
+        setForm((f) => {
+            const next = { ...f, [name]: value };
+            setFieldErrors((prev) => {
+                const nextErrors = { ...prev };
+
+                if (name === 'scholarNo') {
+                    const msg = validateScholar(next.scholarNo);
+                    if (msg) nextErrors.scholarNo = msg;
+                    else delete nextErrors.scholarNo;
+                }
+                if (name === 'phone') {
+                    const msg = validatePhone(next.phone);
+                    if (msg) nextErrors.phone = msg;
+                    else delete nextErrors.phone;
+                }
+                if (name === 'pincode') {
+                    const msg = validatePincode(next.pincode);
+                    if (msg) nextErrors.pincode = msg;
+                    else delete nextErrors.pincode;
+                }
+                if (name === 'tenthPct') {
+                    const msg = validatePercentage(next.tenthPct);
+                    if (msg) nextErrors.tenthPct = msg;
+                    else delete nextErrors.tenthPct;
+                }
+                if (name === 'twelfthPct') {
+                    const msg = validatePercentage(next.twelfthPct);
+                    if (msg) nextErrors.twelfthPct = msg;
+                    else delete nextErrors.twelfthPct;
+                }
+                if (name === 'backlogs') {
+                    const msg = validateBacklogs(next.backlogs);
+                    if (msg) nextErrors.backlogs = msg;
+                    else delete nextErrors.backlogs;
+                }
+                if (name === 'cgpa') {
+                    const msg = validateCgpa(next.cgpa);
+                    if (msg) nextErrors.cgpa = msg;
+                    else delete nextErrors.cgpa;
+                }
+                if (name === 'sgpa') {
+                    const msg = validateSgpa(next.sgpa);
+                    if (msg) nextErrors.sgpa = msg;
+                    else delete nextErrors.sgpa;
+                }
+                if (name === 'semester') {
+                    const msg = validateSemester(next.semester);
+                    if (msg) nextErrors.semester = msg;
+                    else delete nextErrors.semester;
+                }
+                if (name === 'tenthYear' || name === 'twelfthYear') {
+                    const yearErr = validateYearGap(next.tenthYear, next.twelfthYear);
+                    if (yearErr.tenthYear) nextErrors.tenthYear = yearErr.tenthYear;
+                    else delete nextErrors.tenthYear;
+                    if (yearErr.twelfthYear) nextErrors.twelfthYear = yearErr.twelfthYear;
+                    else delete nextErrors.twelfthYear;
+                }
+                if (name === 'branch' && next.branch) delete nextErrors.branch;
+                if (name === 'course' && next.course) delete nextErrors.course;
+
+                return nextErrors;
+            });
+            return next;
+        });
     };
 
     const runStep0Validation = (): boolean => {
@@ -423,6 +495,8 @@ export default function StudentProfile() {
         if (!form.course) err.course = 'Please select a valid course';
         const scholarErr = validateScholar(form.scholarNo);
         if (scholarErr) err.scholarNo = scholarErr;
+        const phoneErr = validatePhone(form.phone);
+        if (phoneErr) err.phone = phoneErr;
         const pincodeErr = validatePincode(form.pincode);
         if (pincodeErr) err.pincode = pincodeErr;
         setFieldErrors(err);
@@ -445,7 +519,21 @@ export default function StudentProfile() {
         if (semesterErr) err.semester = semesterErr;
         const yearErr = validateYearGap(form.tenthYear, form.twelfthYear);
         Object.assign(err, yearErr);
-        setFieldErrors((prev) => ({ ...prev, ...err }));
+        setFieldErrors((prev) => {
+            const next = { ...prev };
+            [
+                'tenthPct',
+                'twelfthPct',
+                'backlogs',
+                'cgpa',
+                'sgpa',
+                'semester',
+                'tenthYear',
+                'twelfthYear',
+            ].forEach((k) => delete next[k]);
+            Object.assign(next, err);
+            return next;
+        });
         return Object.keys(err).length === 0;
     };
 
@@ -483,6 +571,27 @@ export default function StudentProfile() {
         setInternFormErrors(err);
         return Object.keys(err).length === 0;
     };
+
+    useEffect(() => {
+        if (!internForm.startDate || !internForm.endDate) {
+            setInternFormErrors((prev) => {
+                if (!prev.endDate) return prev;
+                const next = { ...prev };
+                delete next.endDate;
+                return next;
+            });
+            return;
+        }
+        setInternFormErrors((prev) => {
+            const next = { ...prev };
+            if (new Date(internForm.endDate) <= new Date(internForm.startDate)) {
+                next.endDate = 'Internship end date must be after start date';
+            } else {
+                delete next.endDate;
+            }
+            return next;
+        });
+    }, [internForm.startDate, internForm.endDate]);
 
     const handleAddInternship = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -831,6 +940,7 @@ export default function StudentProfile() {
                                             value={form.scholarNo}
                                             onChange={handleChange}
                                             placeholder="10 digits"
+                                            maxLength={10}
                                             error={fieldErrors.scholarNo}
                                             hint="Exactly 10 digits when provided."
                                             onBlur={(e) =>
@@ -848,6 +958,7 @@ export default function StudentProfile() {
                                             value={form.phone}
                                             onChange={handleChange}
                                             placeholder="9876543210"
+                                            maxLength={10}
                                             error={fieldErrors.phone}
                                         />
                                         <FormField

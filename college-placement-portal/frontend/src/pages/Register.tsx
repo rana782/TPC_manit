@@ -8,6 +8,7 @@ import AuthLayout from '../components/ui/AuthLayout';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import OtpInput from '../components/ui/OtpInput';
+import { getViteApiBase } from '../utils/apiBase';
 
 export default function Register() {
     const [name, setName] = useState('');
@@ -34,7 +35,7 @@ export default function Register() {
                 setLoading(false);
                 return;
             }
-            await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/register`, {
+            await axios.post(`${getViteApiBase()}/auth/register`, {
                 name,
                 email,
                 password,
@@ -55,7 +56,7 @@ export default function Register() {
         setError('');
         setVerifyLoading(true);
         try {
-            const res = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/verify-email`, {
+            const res = await axios.post(`${getViteApiBase()}/auth/verify-email`, {
                 email,
                 otp
             });

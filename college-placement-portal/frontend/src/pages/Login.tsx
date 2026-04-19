@@ -9,11 +9,9 @@ import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import { getViteApiOrigin } from '../utils/apiBase';
 
-const DEMO_PASSWORD = 'Pass@123';
-
 export default function Login() {
-    const [email, setEmail] = useState('spoc@example.com');
-    const [password, setPassword] = useState(DEMO_PASSWORD);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
@@ -59,28 +57,6 @@ export default function Login() {
                 )}
             </AnimatePresence>
             <form onSubmit={handleSubmit} className="space-y-5">
-                <div className="flex flex-wrap gap-2">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setEmail('spoc@example.com');
-                            setPassword(DEMO_PASSWORD);
-                        }}
-                        className="text-xs px-2.5 py-1 rounded-md border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
-                    >
-                        Demo: SPOC
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setEmail('coord@example.com');
-                            setPassword(DEMO_PASSWORD);
-                        }}
-                        className="text-xs px-2.5 py-1 rounded-md border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
-                    >
-                        Demo: Coordinator
-                    </button>
-                </div>
                 <Input
                     label="Email address"
                     type="email"

@@ -4,10 +4,12 @@ import { useAuth } from '../context/AuthContext';
 import { getViteApiBase } from '../utils/apiBase';
 import { Link } from 'react-router-dom';
 import { clsx } from 'clsx';
+import ConfirmModal from '../components/ui/ConfirmModal';
+import PageHeader, { LayoutContainer } from '../components/layout/PageHeader';
 import {
     Users, ShieldCheck, Mail, Linkedin,
     Briefcase, FileText, Lock, Unlock,
-    CheckCircle2, XCircle, Search, ArrowLeft,
+    CheckCircle2, XCircle, Search,
     ToggleLeft, ToggleRight, RefreshCw, UserCheck, UserX,
     Shield, Save, Clock, Settings2, UserCircle, Trash2
 } from 'lucide-react';
@@ -41,11 +43,43 @@ function logUserDisplayName(user: { email: string; student?: { firstName: string
     return formatEmailLocal(user.email);
 }
 
+function formatDisableRemaining(disabledUntil?: string | null, nowMs = Date.now()): string {
+    if (!disabledUntil) return '';
+    const end = new Date(disabledUntil).getTime();
+    if (Number.isNaN(end)) return '';
+    const diff = Math.max(0, end - nowMs);
+    if (diff <= 0) return '0m remaining';
+
+    const totalMinutes = Math.ceil(diff / 60000);
+    const days = Math.floor(totalMinutes / (24 * 60));
+    const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+    const minutes = totalMinutes % 60;
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0 && days === 0) parts.push(`${minutes}m`);
+    return `${parts.join(' ')} remaining`;
+}
+
+function formatDisabledUntil(disabledUntil?: string | null): string {
+    if (!disabledUntil) return '';
+    const end = new Date(disabledUntil);
+    if (Number.isNaN(end.getTime())) return '';
+    return end.toLocaleString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
 interface User {
     id: string;
     email: string;
     role: string;
     isDisabled: boolean;
+    disabledUntil?: string | null;
     createdAt: string;
     student?: {
         firstName: string;
@@ -102,6 +136,17 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
     { key: 'linkedin', label: 'LinkedIn', icon: Linkedin },
 ];
 
+type AdminConfirmModalState = {
+    open: boolean;
+    title: string;
+    description: string;
+    variant: 'danger' | 'warning' | 'default';
+    confirmLabel: string;
+    inputLabel?: string;
+    inputPlaceholder?: string;
+    onConfirm: (inputValue?: string) => boolean | void | Promise<boolean | void>;
+};
+
 export default function AdminDashboard() {
     const { token, user } = useAuth();
     const [users, setUsers] = useState<User[]>([]);
@@ -118,16 +163,55 @@ export default function AdminDashboard() {
     const [savingEmailTemplate, setSavingEmailTemplate] = useState(false);
     const [linkedInLogs, setLinkedInLogs] = useState<LinkedInLog[]>([]);
     const [linkedInEnabled, setLinkedInEnabled] = useState(false);
+    const [linkedInTemplate, setLinkedInTemplate] = useState('');
+    const [linkedInTemplateSource, setLinkedInTemplateSource] = useState<'DB' | 'DEFAULT'>('DEFAULT');
+    const [savingLinkedInTemplate, setSavingLinkedInTemplate] = useState(false);
     const [error, setError] = useState('');
     const [actionMsg, setActionMsg] = useState('');
     const [userSearch, setUserSearch] = useState('');
+    const [nowMs, setNowMs] = useState(() => Date.now());
+
+    const [confirmModal, setConfirmModal] = useState<AdminConfirmModalState>({
+        open: false,
+        title: '',
+        description: '',
+        variant: 'danger',
+        confirmLabel: 'Confirm',
+        onConfirm: () => {},
+    });
+
+    const closeConfirm = () => setConfirmModal((prev) => ({ ...prev, open: false }));
+    const openConfirm = (cfg: Omit<AdminConfirmModalState, 'open'>) =>
+        setConfirmModal({ ...cfg, open: true });
 
     const headers = { Authorization: `Bearer ${token}` };
 
     const fetchUsers = async (role = '') => {
-        const params = role ? `?role=${role}` : '';
-        const res = await axios.get(`${getViteApiBase()}/admin/users${params}`, { headers });
-        if (res.data.success) { setUsers(res.data.users); setTotal(res.data.total); }
+        const pageSize = 200;
+        let page = 1;
+        let total = 0;
+        const allUsers: User[] = [];
+
+        while (true) {
+            const query = new URLSearchParams({
+                page: String(page),
+                limit: String(pageSize),
+            });
+            if (role) query.set('role', role);
+
+            const res = await axios.get(`${getViteApiBase()}/admin/users?${query.toString()}`, { headers });
+            if (!res.data?.success) break;
+
+            const batch: User[] = Array.isArray(res.data.users) ? res.data.users : [];
+            total = Number(res.data.total) || total;
+            allUsers.push(...batch);
+
+            if (batch.length === 0 || (total > 0 && allUsers.length >= total)) break;
+            page += 1;
+        }
+
+        setUsers(allUsers);
+        setTotal(total || allUsers.length);
     };
 
     const fetchSpocs = async () => {
@@ -159,12 +243,17 @@ export default function AdminDashboard() {
 
     const fetchLinkedInData = async () => {
         try {
-            const [logsRes, settingsRes] = await Promise.all([
+            const [logsRes, settingsRes, templateRes] = await Promise.all([
                 axios.get(`${getViteApiBase()}/announcements/linkedin/logs`, { headers }),
-                axios.get(`${getViteApiBase()}/announcements/linkedin/settings`, { headers })
+                axios.get(`${getViteApiBase()}/announcements/linkedin/settings`, { headers }),
+                axios.get(`${getViteApiBase()}/announcements/linkedin/template`, { headers })
             ]);
             if (logsRes.data.success) setLinkedInLogs(logsRes.data.logs);
             if (settingsRes.data.success) setLinkedInEnabled(settingsRes.data.setting?.value === 'true');
+            if (templateRes.data.success) {
+                setLinkedInTemplate(templateRes.data.template || '');
+                setLinkedInTemplateSource(templateRes.data.source === 'DB' ? 'DB' : 'DEFAULT');
+            }
         } catch (e) { console.error("Failed to fetch LinkedIn data", e); }
     };
 
@@ -177,13 +266,35 @@ export default function AdminDashboard() {
         }
     }, [token, user]);
 
-    const handleDisable = async (id: string) => {
-        if (!window.confirm('Disable this user?')) return;
-        try {
-            await axios.patch(`${getViteApiBase()}/admin/users/${id}/disable`, {}, { headers });
-            setActionMsg('User disabled.');
-            fetchUsers(roleFilter);
-        } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed'); }
+    useEffect(() => {
+        const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+        return () => window.clearInterval(timer);
+    }, []);
+
+    const handleDisable = (id: string) => {
+        openConfirm({
+            title: 'Disable this user?',
+            description: 'Set a disable duration in days (1 to 180). The account will re-enable automatically after the timer ends.',
+            variant: 'warning',
+            confirmLabel: 'Disable',
+            inputLabel: 'Disable duration (days)',
+            inputPlaceholder: 'e.g. 7',
+            onConfirm: async (inputValue) => {
+                const days = Number(inputValue?.trim());
+                if (!Number.isInteger(days) || days < 1 || days > 180) {
+                    setActionMsg('Please enter a valid disable duration between 1 and 180 days.');
+                    return false;
+                }
+                try {
+                    await axios.patch(`${getViteApiBase()}/admin/users/${id}/disable`, { disableDays: days }, { headers });
+                    setActionMsg(`User disabled for ${days} day${days === 1 ? '' : 's'}.`);
+                    fetchUsers(roleFilter);
+                } catch (e: any) {
+                    setActionMsg(e.response?.data?.message || 'Failed');
+                }
+                return true;
+            },
+        });
     };
 
     const handleEnable = async (id: string) => {
@@ -194,42 +305,58 @@ export default function AdminDashboard() {
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed'); }
     };
 
-    const handleDeleteUser = async (target: User) => {
+    const handleDeleteUser = (target: User) => {
         if (target.id === user?.id) {
             setActionMsg('You cannot delete your own coordinator account.');
             return;
         }
-        const warn = [
-            `Delete user account permanently?`,
-            '',
-            `Email: ${target.email}`,
-            `Role: ${target.role}`,
-            '',
-            'This action deletes the account and related data.'
-        ].join('\n');
-        const ok = window.confirm(warn);
-        if (!ok) return;
-        try {
-            await axios.delete(`${getViteApiBase()}/admin/users/${target.id}`, { headers });
-            setActionMsg(`Deleted ${target.email}.`);
-            await fetchUsers(roleFilter);
-            if (target.role === 'SPOC') await fetchSpocs();
-        } catch (e: any) {
-            setActionMsg(e.response?.data?.message || 'Failed to delete user');
-        }
+        openConfirm({
+            title: 'Delete account permanently?',
+            description: `Delete ${target.email} (${target.role})? This removes the account and all related data.`,
+            variant: 'danger',
+            confirmLabel: 'Delete',
+            onConfirm: async () => {
+                try {
+                    await axios.delete(`${getViteApiBase()}/admin/users/${target.id}`, { headers });
+                    setActionMsg(`Deleted ${target.email}.`);
+                    await fetchUsers(roleFilter);
+                    if (target.role === 'SPOC') await fetchSpocs();
+                } catch (e: any) {
+                    setActionMsg(e.response?.data?.message || 'Failed to delete user');
+                }
+            },
+        });
     };
 
-    const handleUnlock = async (userId: string) => {
-        const reason = window.prompt("Enter override reason for unlocking this student:", "Administrative Unlock");
-        if (!reason) return;
-        try {
-            await axios.post(`${getViteApiBase()}/admin/overrides`, {
-                actionType: 'UNLOCK_STUDENT', entity: 'Student', entityId: userId,
-                spocId: user?.id, reason
-            }, { headers });
-            setActionMsg('Profile unlocked via Override log.');
-            fetchUsers(roleFilter);
-        } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to unlock'); }
+    const handleUnlock = (userId: string) => {
+        openConfirm({
+            title: 'Unlock student profile',
+            description: 'Enter the reason for this administrative override.',
+            variant: 'warning',
+            confirmLabel: 'Unlock',
+            inputLabel: 'Override reason',
+            inputPlaceholder: 'Administrative Unlock',
+            onConfirm: async (reason) => {
+                if (!reason?.trim()) return;
+                try {
+                    await axios.post(
+                        `${getViteApiBase()}/admin/overrides`,
+                        {
+                            actionType: 'UNLOCK_STUDENT',
+                            entity: 'Student',
+                            entityId: userId,
+                            spocId: user?.id,
+                            reason: reason.trim(),
+                        },
+                        { headers }
+                    );
+                    setActionMsg('Profile unlocked via Override log.');
+                    fetchUsers(roleFilter);
+                } catch (e: any) {
+                    setActionMsg(e.response?.data?.message || 'Failed to unlock');
+                }
+            },
+        });
     };
 
     const handleApproveSpoc = async (id: string) => {
@@ -240,19 +367,23 @@ export default function AdminDashboard() {
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to approve SPOC'); }
     };
 
-    const handleRejectPendingSpoc = async (id: string, email: string) => {
-        const ok = window.confirm(
-            `Reject pending SPOC request for ${email}?\n\nThis permanently deletes the account.`
-        );
-        if (!ok) return;
-        try {
-            await axios.post(`${getViteApiBase()}/admin/spocs/${id}/reject`, {}, { headers });
-            setActionMsg('Pending SPOC request rejected and account deleted.');
-            fetchSpocs();
-            fetchUsers(roleFilter);
-        } catch (e: any) {
-            setActionMsg(e.response?.data?.message || 'Failed to reject SPOC request');
-        }
+    const handleRejectPendingSpoc = (id: string, email: string) => {
+        openConfirm({
+            title: 'Reject SPOC request?',
+            description: `Reject pending SPOC for ${email}? This permanently deletes their account.`,
+            variant: 'danger',
+            confirmLabel: 'Reject',
+            onConfirm: async () => {
+                try {
+                    await axios.post(`${getViteApiBase()}/admin/spocs/${id}/reject`, {}, { headers });
+                    setActionMsg('Pending SPOC request rejected and account deleted.');
+                    fetchSpocs();
+                    fetchUsers(roleFilter);
+                } catch (e: any) {
+                    setActionMsg(e.response?.data?.message || 'Failed to reject SPOC request');
+                }
+            },
+        });
     };
 
     const handleTogglePermission = async (id: string, perm: string, currentVal: boolean) => {
@@ -263,19 +394,23 @@ export default function AdminDashboard() {
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to update permission'); }
     };
 
-    const handleRevokeSpoc = async (id: string, email: string) => {
-        const ok = window.confirm(
-            `Revoke ${email}?\n\nThis permanently deletes the SPOC account and related SPOC-owned data from the database.`
-        );
-        if (!ok) return;
-        try {
-            await axios.post(`${getViteApiBase()}/admin/spocs/${id}/revoke`, {}, { headers });
-            setActionMsg('SPOC revoked and deleted successfully.');
-            fetchSpocs();
-            fetchUsers(roleFilter);
-        } catch (e: any) {
-            setActionMsg(e.response?.data?.message || 'Failed to revoke SPOC');
-        }
+    const handleRevokeSpoc = (id: string, email: string) => {
+        openConfirm({
+            title: 'Revoke SPOC access?',
+            description: `This permanently deletes ${email}'s SPOC account and all related data.`,
+            variant: 'danger',
+            confirmLabel: 'Revoke',
+            onConfirm: async () => {
+                try {
+                    await axios.post(`${getViteApiBase()}/admin/spocs/${id}/revoke`, {}, { headers });
+                    setActionMsg('SPOC revoked and deleted successfully.');
+                    fetchSpocs();
+                    fetchUsers(roleFilter);
+                } catch (e: any) {
+                    setActionMsg(e.response?.data?.message || 'Failed to revoke SPOC');
+                }
+            },
+        });
     };
 
     const handleRoleFilter = (role: string) => { setRoleFilter(role); fetchUsers(role); };
@@ -309,6 +444,44 @@ export default function AdminDashboard() {
         }
     };
 
+    const saveLinkedInTemplate = async () => {
+        if (!linkedInTemplate.trim()) {
+            setActionMsg('LinkedIn template cannot be empty.');
+            return;
+        }
+        try {
+            setSavingLinkedInTemplate(true);
+            await axios.put(
+                `${getViteApiBase()}/announcements/linkedin/template`,
+                { templateText: linkedInTemplate.trim() },
+                { headers }
+            );
+            setActionMsg('LinkedIn template saved.');
+            await fetchLinkedInData();
+        } catch (e: any) {
+            setActionMsg(e.response?.data?.message || 'Failed to save LinkedIn template');
+        } finally {
+            setSavingLinkedInTemplate(false);
+        }
+    };
+
+    const resetLinkedInTemplate = async () => {
+        try {
+            setSavingLinkedInTemplate(true);
+            await axios.put(
+                `${getViteApiBase()}/announcements/linkedin/template`,
+                { resetToDefault: true },
+                { headers }
+            );
+            setActionMsg('LinkedIn template reset to default.');
+            await fetchLinkedInData();
+        } catch (e: any) {
+            setActionMsg(e.response?.data?.message || 'Failed to reset LinkedIn template');
+        } finally {
+            setSavingLinkedInTemplate(false);
+        }
+    };
+
     const toggleLinkedInSettings = async (enabled: boolean) => {
         try {
             await axios.patch(`${getViteApiBase()}/announcements/linkedin/settings`, { enabled }, { headers });
@@ -317,21 +490,28 @@ export default function AdminDashboard() {
         } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to update settings'); }
     };
 
-    const handlePublishLinkedIn = async (jobId: string) => {
-        if (!window.confirm("Trigger LinkedIn Post for this job?")) return;
-        const customTemplate = window.prompt(
-            'Edit caption template (leave empty to use backend default template):',
-            '🎉 Congratulations from TPC!\\n'
-        );
-        try {
-            const body: any = {};
-            if (typeof customTemplate === 'string' && customTemplate.trim()) {
-                body.post_template = customTemplate.trim();
-            }
-            const res = await axios.post(`${getViteApiBase()}/announcements/job/${jobId}/publish`, body, { headers });
-            setActionMsg(res.data.message);
-            fetchLinkedInData();
-        } catch (e: any) { setActionMsg(e.response?.data?.message || 'Failed to trigger publish'); }
+    const handlePublishLinkedIn = (jobId: string) => {
+        openConfirm({
+            title: 'Trigger LinkedIn post?',
+            description: 'This will publish a placement announcement to the TPC LinkedIn page.',
+            variant: 'default',
+            confirmLabel: 'Publish',
+            inputLabel: 'Caption template (optional)',
+            inputPlaceholder: '🎉 Congratulations from TPC!',
+            onConfirm: async (customTemplate) => {
+                try {
+                    const body: Record<string, string> = {};
+                    if (typeof customTemplate === 'string' && customTemplate.trim()) {
+                        body.post_template = customTemplate.trim();
+                    }
+                    const res = await axios.post(`${getViteApiBase()}/announcements/job/${jobId}/publish`, body, { headers });
+                    setActionMsg(res.data.message);
+                    fetchLinkedInData();
+                } catch (e: any) {
+                    setActionMsg(e.response?.data?.message || 'Failed to trigger publish');
+                }
+            },
+        });
     };
 
     // Helpers
@@ -388,111 +568,49 @@ export default function AdminDashboard() {
     );
 
     return (
-        <div className="min-h-full bg-slate-100/80" data-testid="admin-dashboard">
-            <div className="max-w-[1680px] mx-auto flex flex-col lg:flex-row min-h-full">
-                <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-slate-200/80 bg-white/95 backdrop-blur-sm py-6 px-4 shadow-[1px_0_0_0_rgba(15,23,42,0.04)] lg:min-h-screen">
-                    <div className="px-1 mb-8">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm ring-1 ring-slate-900/5 mb-4">
-                            <Shield className="w-[18px] h-[18px]" aria-hidden />
-                        </div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Admin console</p>
-                        <h1 className="text-lg font-display font-semibold text-slate-900 leading-snug mt-1">Coordinator</h1>
-                        <p className="text-[13px] text-slate-500 mt-2 leading-relaxed">
-                            Accounts, SPOC access, and outbound messaging.
-                        </p>
-                    </div>
-                    <nav className="flex flex-col gap-0.5 flex-1" aria-label="Admin sections">
-                        {TABS.map((tab) => (
-                            <button
-                                key={tab.key}
-                                type="button"
-                                onClick={() => setActiveTab(tab.key)}
-                                className={clsx(
-                                    'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-semibold transition-colors',
-                                    activeTab === tab.key
-                                        ? 'bg-slate-900 text-white shadow-sm'
-                                        : 'text-slate-600 hover:bg-slate-100/90'
-                                )}
-                            >
-                                <tab.icon className={clsx('w-4 h-4 shrink-0', activeTab === tab.key ? 'text-white' : 'text-slate-500')} />
-                                <span className="flex-1 truncate">{tab.label}</span>
-                                {tab.key === 'users' && (
-                                    <span
-                                        className={clsx(
-                                            'text-[11px] px-2 py-0.5 rounded-md font-semibold tabular-nums',
-                                            activeTab === tab.key ? 'bg-white/15 text-white' : 'bg-slate-200/90 text-slate-700'
-                                        )}
-                                    >
-                                        {total}
-                                    </span>
-                                )}
-                                {tab.key === 'spocs' && pendingSpocs.length > 0 && (
-                                    <span className="min-w-[1.25rem] h-5 text-[10px] font-semibold bg-rose-600 text-white rounded-full flex items-center justify-center shadow-sm">
-                                        {pendingSpocs.length}
-                                    </span>
-                                )}
-                            </button>
-                        ))}
-                    </nav>
-                    <Link
-                        to="/dashboard"
-                        className="mt-auto pt-4 mx-1 flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 shadow-sm hover:border-slate-300 hover:bg-slate-50 transition-colors"
-                    >
-                        <ArrowLeft className="w-3.5 h-3.5 opacity-70" />
-                        Back to app
-                    </Link>
-                </aside>
+        <>
+            <LayoutContainer className="space-y-6" data-testid="admin-dashboard">
+                <PageHeader
+                    title="Admin console"
+                    subtitle="Manage accounts, SPOC access, email automation, and outbound messaging."
+                    breadcrumbs={[{ label: 'Admin' }]}
+                />
 
-                <div className="flex-1 min-w-0 flex flex-col">
-                    <div className="lg:hidden border-b border-slate-200 bg-white">
-                        <div className="px-4 pt-4 pb-2 flex items-start justify-between gap-3">
-                            <div>
-                                <p className="text-xs font-medium text-slate-500">Administration</p>
-                                <h1 className="text-xl font-display font-semibold text-slate-900 tracking-tight">Coordinator console</h1>
-                            </div>
-                            <Link
-                                to="/dashboard"
-                                className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-indigo-700 shrink-0"
-                            >
-                                <ArrowLeft className="w-3.5 h-3.5" /> Exit
-                            </Link>
-                        </div>
-                        <div className="flex items-center gap-1 overflow-x-auto px-2 pb-3">
-                            {TABS.map((tab) => (
-                                <button
-                                    key={tab.key}
-                                    type="button"
-                                    onClick={() => setActiveTab(tab.key)}
-                                    className={clsx(
-                                        'inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg whitespace-nowrap shrink-0 transition-colors',
-                                        activeTab === tab.key
-                                            ? 'bg-slate-900 text-white shadow-sm'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                    )}
-                                >
-                                    <tab.icon className="w-3.5 h-3.5" />
-                                    {tab.label}
-                                    {tab.key === 'users' && (
-                                        <span
-                                            className={clsx(
-                                                'text-[10px] px-1 rounded font-bold',
-                                                activeTab === tab.key ? 'bg-white/20' : 'bg-white/90 text-slate-600'
-                                            )}
-                                        >
-                                            {total}
-                                        </span>
-                                    )}
-                                    {tab.key === 'spocs' && pendingSpocs.length > 0 && (
-                                        <span className="min-w-[1rem] h-4 text-[9px] font-semibold bg-rose-600 text-white rounded-full flex items-center justify-center">
-                                            {pendingSpocs.length}
-                                        </span>
-                                    )}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                {/* Horizontal tab bar */}
+                <div className="flex flex-wrap gap-1 rounded-2xl border border-slate-200 bg-slate-50 p-1.5">
+                    {TABS.map((tab) => (
+                        <button
+                            key={tab.key}
+                            type="button"
+                            onClick={() => setActiveTab(tab.key)}
+                            className={clsx(
+                                'relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-colors',
+                                activeTab === tab.key
+                                    ? 'bg-white text-slate-900 shadow-sm'
+                                    : 'text-slate-500 hover:text-slate-700'
+                            )}
+                        >
+                            <tab.icon className="h-4 w-4 flex-shrink-0" />
+                            {tab.label}
+                            {tab.key === 'users' && total > 0 && (
+                                <span className={clsx(
+                                    'ml-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
+                                    activeTab === tab.key ? 'bg-slate-100 text-slate-700' : 'bg-slate-200 text-slate-600'
+                                )}>
+                                    {total}
+                                </span>
+                            )}
+                            {tab.key === 'spocs' && pendingSpocs.length > 0 && (
+                                <span className="ml-1 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-semibold text-white">
+                                    {pendingSpocs.length}
+                                </span>
+                            )}
+                        </button>
+                    ))}
+                </div>
 
-                    <main className="p-4 sm:p-6 lg:p-8 flex-1 lg:bg-[linear-gradient(180deg,rgba(248,250,252,0.5)_0%,transparent_28%)]">
+                {/* Tab content */}
+                <div className="p-4 sm:p-6 lg:p-8 lg:bg-[linear-gradient(180deg,rgba(248,250,252,0.5)_0%,transparent_28%)] space-y-6">
                         <div className="hidden lg:flex items-center justify-between gap-6 mb-8">
                             <div className="min-w-0 pr-4">
                                 <p className="text-xs font-medium text-slate-500 mb-1">You are viewing</p>
@@ -664,26 +782,36 @@ export default function AdminDashboard() {
                                                     </span>
                                                 </td>
                                                 <td className="px-4 sm:px-5 py-3.5 align-top">
-                                                    <span
-                                                        className={clsx(
-                                                            'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold',
-                                                            u.isDisabled
-                                                                ? 'border-rose-200 bg-rose-50 text-rose-800'
-                                                                : 'border-emerald-200/90 bg-emerald-50/90 text-emerald-800'
+                                                    <div>
+                                                        <span
+                                                            className={clsx(
+                                                                'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold',
+                                                                u.isDisabled
+                                                                    ? 'border-rose-200 bg-rose-50 text-rose-800'
+                                                                    : 'border-emerald-200/90 bg-emerald-50/90 text-emerald-800'
+                                                            )}
+                                                        >
+                                                            {u.isDisabled ? (
+                                                                <>
+                                                                    <XCircle className="w-3 h-3" aria-hidden />
+                                                                    Disabled
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <CheckCircle2 className="w-3 h-3" aria-hidden />
+                                                                    Active
+                                                                </>
+                                                            )}
+                                                        </span>
+                                                        {u.isDisabled && u.disabledUntil && (
+                                                            <p
+                                                                className="mt-1 text-[11px] font-medium text-rose-700"
+                                                                title={`Disabled until ${formatDisabledUntil(u.disabledUntil)}`}
+                                                            >
+                                                                {formatDisableRemaining(u.disabledUntil, nowMs)}
+                                                            </p>
                                                         )}
-                                                    >
-                                                        {u.isDisabled ? (
-                                                            <>
-                                                                <XCircle className="w-3 h-3" aria-hidden />
-                                                                Disabled
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <CheckCircle2 className="w-3 h-3" aria-hidden />
-                                                                Active
-                                                            </>
-                                                        )}
-                                                    </span>
+                                                    </div>
                                                 </td>
                                                 <td className="px-4 sm:px-5 py-3.5 align-top text-sm">
                                                     {u.role === 'STUDENT' ? (
@@ -1038,6 +1166,63 @@ export default function AdminDashboard() {
                         </div>
                     </div>
 
+                    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+                        <div className="mb-4">
+                            <h3 className="text-sm font-display font-bold text-slate-900">LinkedIn caption template</h3>
+                            <p className="text-xs text-gray-500 mt-1">
+                                SPOC-style generic format. Placeholders: <code>{'{company_name}'}</code>, <code>{'{placement_year}'}</code>, <code>{'{placed_count}'}</code>, <code>{'{placed_students}'}</code>. You can still override caption manually while publishing.
+                            </p>
+                        </div>
+                        <div className="border border-gray-100 rounded-xl p-4 bg-gray-50/50">
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                                <p className="text-sm font-bold text-gray-900">Default template used by LinkedIn publish</p>
+                                <span
+                                    className={clsx(
+                                        'text-[10px] px-2 py-0.5 rounded-full border font-bold',
+                                        linkedInTemplateSource === 'DB'
+                                            ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                            : 'text-gray-600 bg-gray-100 border-gray-200'
+                                    )}
+                                >
+                                    {linkedInTemplateSource}
+                                </span>
+                            </div>
+                            <textarea
+                                value={linkedInTemplate}
+                                onChange={(e) => setLinkedInTemplate(e.target.value)}
+                                rows={5}
+                                className="w-full rounded-lg border border-gray-200 bg-white text-sm px-3 py-2.5 focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 focus:outline-none"
+                            />
+                            <div className="flex justify-end mt-3 gap-2">
+                                <button
+                                    onClick={resetLinkedInTemplate}
+                                    disabled={savingLinkedInTemplate}
+                                    className={clsx(
+                                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all',
+                                        savingLinkedInTemplate
+                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                            : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                    )}
+                                >
+                                    Reset Template
+                                </button>
+                                <button
+                                    onClick={saveLinkedInTemplate}
+                                    disabled={savingLinkedInTemplate}
+                                    className={clsx(
+                                        'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all',
+                                        savingLinkedInTemplate
+                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                            : 'bg-primary-50 text-primary-700 border-primary-200 hover:bg-primary-100'
+                                    )}
+                                >
+                                    <Save className="w-3.5 h-3.5" />
+                                    {savingLinkedInTemplate ? 'Saving...' : 'Save Template'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
                         <div className="p-5 border-b border-slate-100 bg-slate-50/50">
                             <h3 className="text-sm font-display font-bold text-slate-900">Publish history</h3>
@@ -1088,9 +1273,24 @@ export default function AdminDashboard() {
                     </div>
                 </div>
             )}
-                    </main>
                 </div>
-            </div>
-        </div>
+            </LayoutContainer>
+
+            <ConfirmModal
+                open={confirmModal.open}
+                title={confirmModal.title}
+                description={confirmModal.description}
+                variant={confirmModal.variant}
+                confirmLabel={confirmModal.confirmLabel}
+                cancelLabel="Cancel"
+                inputLabel={confirmModal.inputLabel}
+                inputPlaceholder={confirmModal.inputPlaceholder}
+                onConfirm={async (val) => {
+                    const result = await confirmModal.onConfirm(val);
+                    if (result !== false) closeConfirm();
+                }}
+                onCancel={closeConfirm}
+            />
+        </>
     );
 }

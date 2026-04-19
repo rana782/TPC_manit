@@ -1,6 +1,13 @@
 import { Router } from 'express';
 import { createAnnouncement, getAnnouncementLogs } from '../controllers/announcement.controller';
-import { publishAnnouncement, getLinkedInLogs, getLinkedInSettings, updateLinkedInSettings } from '../controllers/linkedin.controller';
+import {
+    publishAnnouncement,
+    getLinkedInLogs,
+    getLinkedInSettings,
+    updateLinkedInSettings,
+    getLinkedInTemplate,
+    updateLinkedInTemplate
+} from '../controllers/linkedin.controller';
 import { verifyToken, requireRole } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -17,5 +24,7 @@ router.post('/job/:job_id/publish', requireRole(['COORDINATOR', 'SPOC']), publis
 router.get('/linkedin/logs', requireRole(['COORDINATOR']), getLinkedInLogs);
 router.get('/linkedin/settings', requireRole(['COORDINATOR']), getLinkedInSettings);
 router.patch('/linkedin/settings', requireRole(['COORDINATOR']), updateLinkedInSettings);
+router.get('/linkedin/template', requireRole(['COORDINATOR']), getLinkedInTemplate);
+router.put('/linkedin/template', requireRole(['COORDINATOR']), updateLinkedInTemplate);
 
 export default router;

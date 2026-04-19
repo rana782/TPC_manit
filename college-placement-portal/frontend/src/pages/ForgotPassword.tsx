@@ -7,6 +7,7 @@ import AuthLayout from '../components/ui/AuthLayout';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import OtpInput from '../components/ui/OtpInput';
+import { getViteApiBase } from '../utils/apiBase';
 
 export default function ForgotPassword() {
     const [email, setEmail] = useState('');
@@ -25,7 +26,7 @@ export default function ForgotPassword() {
         setMessage('');
         setLoading(true);
         try {
-            const res = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/forgot-password`, { email });
+            const res = await axios.post(`${getViteApiBase()}/auth/forgot-password`, { email });
             setMessage(res.data.message);
             setStep(2);
         } catch (err: any) {
@@ -41,7 +42,7 @@ export default function ForgotPassword() {
         setMessage('');
         setResetLoading(true);
         try {
-            await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/reset-password`, {
+            await axios.post(`${getViteApiBase()}/auth/reset-password`, {
                 email,
                 otp,
                 newPassword

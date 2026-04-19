@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
-import { publishLinkedInAnnouncement } from '../services/linkedin.service';
+import { publishLinkedInAnnouncement, DEFAULT_LINKEDIN_TEMPLATE } from '../services/linkedin.service';
 import prisma from '../lib/prisma';
 
 // POST /api/announcements/job/:job_id/publish
@@ -89,5 +89,53 @@ export const updateLinkedInSettings = async (req: AuthRequest, res: Response) =>
         return res.json({ success: true, message: 'LinkedIn settings updated', setting });
     } catch (error) {
         return res.status(500).json({ success: false, message: 'Failed to update LinkedIn settings' });
+    }
+};
+
+// GET /api/announcements/linkedin/template
+export const getLinkedInTemplate = async (req: AuthRequest, res: Response) => {
+    try {
+        const setting = await prisma.systemSetting.findUnique({ where: { key: 'LINKEDIN_POST_TEMPLATE' } });
+        return res.json({
+            success: true,
+            template: setting?.value?.trim() ? setting.value : DEFAULT_LINKEDIN_TEMPLATE,
+            source: setting ? 'DB' : 'DEFAULT',
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Failed to fetch LinkedIn template' });
+    }
+};
+
+// PUT /api/announcements/linkedin/template
+export const updateLinkedInTemplate = async (req: AuthRequest, res: Response) => {
+    try {
+        if (req.body?.resetToDefault === true) {
+            await prisma.systemSetting.deleteMany({ where: { key: 'LINKEDIN_POST_TEMPLATE' } });
+            return res.json({
+                success: true,
+                message: 'LinkedIn template reset to default',
+                template: DEFAULT_LINKEDIN_TEMPLATE,
+                source: 'DEFAULT',
+            });
+        }
+
+        const raw = req.body?.templateText;
+        if (typeof raw !== 'string' || !raw.trim()) {
+            return res.status(400).json({ success: false, message: 'templateText is required' });
+        }
+
+        const setting = await prisma.systemSetting.upsert({
+            where: { key: 'LINKEDIN_POST_TEMPLATE' },
+            create: { key: 'LINKEDIN_POST_TEMPLATE', value: raw.trim() },
+            update: { value: raw.trim() },
+        });
+
+        return res.json({
+            success: true,
+            message: 'LinkedIn template updated successfully',
+            setting,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: 'Failed to update LinkedIn template' });
     }
 };

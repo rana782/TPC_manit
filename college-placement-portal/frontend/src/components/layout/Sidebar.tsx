@@ -123,7 +123,7 @@ function SidebarContent({
                         title={collapsed && !isMobile ? item.label : undefined}
                         className={({ isActive }) =>
                             clsx(
-                                'flex items-center gap-3 border-r-4 py-2.5 text-sm transition-colors duration-150',
+                                `flex items-center gap-3 ${isMobile ? 'border-l-4' : 'border-r-4'} py-2.5 text-sm transition-colors duration-150`,
                                 collapsed && !isMobile ? 'justify-center px-2' : 'px-3',
                                 isActive
                                     ? 'border-primary-800 bg-slate-200/60 font-semibold text-primary-950'

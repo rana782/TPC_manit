@@ -53,9 +53,22 @@ export const listUsers = async (req: AuthRequest, res: Response) => {
     try {
         const { role, page = '1', limit = '20' } = req.query as Record<string, string>;
         const skip = (parseInt(page) - 1) * parseInt(limit);
+        const now = new Date();
 
         const where: any = {};
         if (role) where.role = role;
+
+        // Auto-expire timed disablements before returning directory rows.
+        await prisma.user.updateMany({
+            where: {
+                isDisabled: true,
+                disabledUntil: { lte: now },
+            },
+            data: {
+                isDisabled: false,
+                disabledUntil: null,
+            },
+        });
 
         const [users, total] = await Promise.all([
             prisma.user.findMany({
@@ -63,7 +76,7 @@ export const listUsers = async (req: AuthRequest, res: Response) => {
                 skip,
                 take: parseInt(limit),
                 select: {
-                    id: true, email: true, role: true, isDisabled: true, createdAt: true,
+                    id: true, email: true, role: true, isDisabled: true, disabledUntil: true, createdAt: true,
                     student: {
                         select: {
                             firstName: true, lastName: true, isLocked: true,
@@ -86,21 +99,30 @@ export const disableUser = async (req: AuthRequest, res: Response) => {
     try {
         const { id } = req.params;
         const coordinatorId = req.user?.id;
+        const disableDays = Number(req.body?.disableDays);
 
         if (id === coordinatorId) {
             return res.status(400).json({ success: false, message: 'You cannot disable your own account.' });
         }
+        if (!Number.isInteger(disableDays) || disableDays < 1 || disableDays > 180) {
+            return res.status(400).json({ success: false, message: 'disableDays must be an integer between 1 and 180.' });
+        }
 
         const user = await prisma.user.findUnique({ where: { id } });
         if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+        const disabledUntil = new Date(Date.now() + disableDays * 24 * 60 * 60 * 1000);
 
         const updated = await prisma.user.update({
             where: { id },
-            data: { isDisabled: true },
-            select: { id: true, email: true, role: true, isDisabled: true }
+            data: { isDisabled: true, disabledUntil },
+            select: { id: true, email: true, role: true, isDisabled: true, disabledUntil: true }
         });
 
-        res.json({ success: true, message: `User ${user.email} has been disabled.`, user: updated });
+        res.json({
+            success: true,
+            message: `User ${user.email} has been disabled for ${disableDays} day${disableDays === 1 ? '' : 's'}.`,
+            user: updated
+        });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Failed to disable user' });
     }
@@ -115,8 +137,8 @@ export const enableUser = async (req: AuthRequest, res: Response) => {
 
         const updated = await prisma.user.update({
             where: { id },
-            data: { isDisabled: false },
-            select: { id: true, email: true, role: true, isDisabled: true }
+            data: { isDisabled: false, disabledUntil: null },
+            select: { id: true, email: true, role: true, isDisabled: true, disabledUntil: true }
         });
 
         res.json({ success: true, message: `User ${user.email} has been enabled.`, user: updated });

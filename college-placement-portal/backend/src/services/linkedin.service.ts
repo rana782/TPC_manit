@@ -19,16 +19,33 @@ export interface LinkedInPayload {
     post_template: string;
 }
 
-const buildPostTemplate = (companyName: string, students: PlacedStudentInfo[]): string => {
-    const placedList = students
+export const DEFAULT_LINKEDIN_TEMPLATE = `🎉 Congratulations from TPC! 🎉
+We're thrilled to share this update.
+The following students have been placed at {company_name}:
+{placed_students}
+#Placements #TPCC #PlacementDrive`;
+
+const formatPlacedStudentsForTemplate = (students: PlacedStudentInfo[]): string => {
+    if (!students.length) return '• (No placed students yet)';
+    return students
         .map((s) => {
-            const highlightedName = String(s.name || '').toUpperCase();
+            const highlightedName = String(s.name || '').trim().toUpperCase();
             const profile = String(s.linkedin_url || '').trim();
             const linkLine = profile ? `\n  🔗 ${profile}` : '';
             return `• ${highlightedName} (${s.branch}) — ${s.role} @ ${s.ctc}${linkLine}`;
         })
         .join('\n');
-    return `🎉 Placement Announcement 🎉\nWe are proud to announce that the following students have been placed at ${companyName}:\n${placedList}\n#Placements #TPCC #PlacementDrive`;
+};
+
+const getDefaultLinkedInTemplate = async (): Promise<string> => {
+    const fallback = DEFAULT_LINKEDIN_TEMPLATE;
+    try {
+        const setting = await prisma.systemSetting.findUnique({ where: { key: 'LINKEDIN_POST_TEMPLATE' } });
+        if (setting?.value?.trim()) return setting.value.trim();
+    } catch {
+        // fall back to generated template if settings lookup fails
+    }
+    return fallback;
 };
 
 const hasNonEmptyPostTemplate = (value: string | null | undefined): boolean =>
@@ -39,6 +56,14 @@ const normalizeForDuplicateCheck = (value: string): string =>
         .replace(/\s+/g, ' ')
         .trim()
         .toLowerCase();
+
+const applyTemplateParams = (template: string, params: Record<string, string>): string => {
+    let text = template;
+    for (const [key, value] of Object.entries(params)) {
+        text = text.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+    }
+    return text;
+};
 
 export const publishLinkedInAnnouncement = async (
     jobId: string,
@@ -73,9 +98,16 @@ export const publishLinkedInAnnouncement = async (
     }));
 
     const placementYear = new Date().getFullYear();
-    const generatedTemplate = buildPostTemplate(job.companyName, placedStudents);
-    const postTemplate =
+    const generatedTemplate = await getDefaultLinkedInTemplate();
+    const baseTemplate =
         hasNonEmptyPostTemplate(customPostTemplate) ? String(customPostTemplate).trim() : generatedTemplate;
+    const placedStudentsText = formatPlacedStudentsForTemplate(placedStudents);
+    const postTemplate = applyTemplateParams(baseTemplate, {
+        company_name: job.companyName,
+        placement_year: String(placementYear),
+        placed_count: String(placedStudents.length),
+        placed_students: placedStudentsText,
+    });
 
     const payload: LinkedInPayload = {
         comment: postTemplate,
