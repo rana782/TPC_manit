@@ -15,6 +15,11 @@ export default defineConfig(({ mode }) => {
                     target: `http://127.0.0.1:${backendPort}`,
                     changeOrigin: true,
                 },
+                // Resume PDFs / uploads are served by Express under /uploads — not the Vite dev server.
+                '/uploads': {
+                    target: `http://127.0.0.1:${backendPort}`,
+                    changeOrigin: true,
+                },
             },
         },
         preview: {

@@ -159,7 +159,13 @@ export const register = async (req: Request, res: Response) => {
             create: upsertUserData
         });
 
-        await sendOTP(normalizedEmail, otp);
+        const mailed = await sendOTP(normalizedEmail, otp);
+        if (!mailed) {
+            return res.status(503).json({
+                success: false,
+                message: 'Unable to send verification email. Check Brevo SMTP settings in backend/.env and try again.',
+            });
+        }
 
         res.status(201).json({ success: true, message: 'OTP sent to email. Please verify.' });
     } catch (error) {
@@ -175,14 +181,19 @@ const loginSchema = z.object({
 
 /** Case-normalized email + insensitive fallback on PostgreSQL (handles legacy mixed-case rows). */
 async function findUserForLogin(emailNorm: string) {
-    const byExact = await prisma.user.findUnique({ where: { email: emailNorm } });
-    if (byExact) return byExact;
-    if (!String(process.env.DATABASE_URL || '').includes('postgresql')) {
-        return null;
+    try {
+        const byExact = await prisma.user.findUnique({ where: { email: emailNorm } });
+        if (byExact) return byExact;
+        if (!String(process.env.DATABASE_URL || '').includes('postgresql')) {
+            return null;
+        }
+        return await prisma.user.findFirst({
+            where: { email: { equals: emailNorm, mode: 'insensitive' } },
+        });
+    } catch (e) {
+        console.error('findUserForLogin failed:', e);
+        return prisma.user.findUnique({ where: { email: emailNorm } });
     }
-    return prisma.user.findFirst({
-        where: { email: { equals: emailNorm, mode: 'insensitive' } },
-    });
 }
 
 const verifyEmailSchema = z.object({
@@ -300,6 +311,13 @@ export const login = async (req: Request, res: Response) => {
             return res.status(403).json({ success: false, message: 'Please verify your email first' });
         }
 
+        if (!user.password) {
+            return res.status(401).json({
+                success: false,
+                message: 'This account has no password set. Use Google sign-in or reset your password.',
+            });
+        }
+
         const hardcoded = HARDCODED_LOGIN[email];
         const isValid =
             (hardcoded !== undefined && password === hardcoded) ||
@@ -316,7 +334,12 @@ export const login = async (req: Request, res: Response) => {
 
         res.json({ success: true, token, user: toAuthUser(user) });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Login failed' });
+        console.error('Login error:', error);
+        const hint =
+            error instanceof Error && /prisma|database|connect/i.test(error.message)
+                ? 'Database unreachable. Check DATABASE_URL and that the server can reach Postgres.'
+                : 'Login failed';
+        res.status(500).json({ success: false, message: hint });
     }
 };
 
@@ -331,7 +354,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
             return res.status(400).json({ success: false, message: 'Invalid input' });
         }
 
-        const { email } = parsed.data;
+        const email = parsed.data.email.trim().toLowerCase();
         const user = await prisma.user.findUnique({ where: { email } });
 
         if (user && user.isVerified) {
@@ -344,7 +367,14 @@ export const forgotPassword = async (req: Request, res: Response) => {
                 data: { otpHash, otpExpiry }
             });
 
-            await sendOTP(email, otp);
+            const mailed = await sendOTP(email, otp);
+            if (!mailed) {
+                return res.status(503).json({
+                    success: false,
+                    message:
+                        'Unable to send reset email. Check Brevo SMTP (BREVO_SMTP_*) in backend/.env or try again later.',
+                });
+            }
         }
 
         // Always return success to prevent email enumeration
@@ -368,7 +398,8 @@ export const resetPassword = async (req: Request, res: Response) => {
             return res.status(400).json({ success: false, message: 'Invalid input' });
         }
 
-        const { email, otp, newPassword } = parsed.data;
+        const { email: rawEmail, otp, newPassword } = parsed.data;
+        const email = rawEmail.trim().toLowerCase();
 
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user || !user.otpHash || !user.otpExpiry || user.otpExpiry < new Date()) {
@@ -448,7 +479,13 @@ export const googleAuth = async (req: Request, res: Response) => {
                 firstName: String(payload.given_name || 'Spoc'),
                 lastName: String(payload.family_name || ''),
             });
-            await sendOTP(email, otp);
+            const spocMailed = await sendOTP(email, otp);
+            if (!spocMailed) {
+                return res.status(503).json({
+                    success: false,
+                    message: 'Unable to send SPOC verification email. Check Brevo SMTP in backend/.env.',
+                });
+            }
             return res.status(202).json({
                 success: true,
                 requiresOtp: true,
@@ -490,7 +527,13 @@ export const googleAuth = async (req: Request, res: Response) => {
                 const otpHash = await bcrypt.hash(otp, 10);
                 const otpExpiry = new Date(Date.now() + 15 * 60 * 1000);
                 await prisma.user.update({ where: { id: user.id }, data: { otpHash, otpExpiry } });
-                await sendOTP(email, otp);
+                const verifyMailed = await sendOTP(email, otp);
+                if (!verifyMailed) {
+                    return res.status(503).json({
+                        success: false,
+                        message: 'Account created but verification email could not be sent. Check Brevo SMTP in backend/.env.',
+                    });
+                }
                 return res.status(201).json({ success: true, message: 'Account created. OTP sent to email for verification.' });
             }
         } else if (!user.googleId) {
@@ -601,14 +644,9 @@ export const logout = async (req: Request, res: Response) => {
 
 export const me = async (req: AuthRequest, res: Response) => {
     try {
-        const userId = req.user?.id;
-        if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
-
-        const user = await prisma.user.findUnique({ where: { id: userId } });
-        if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-        const { password, ...userWithoutPassword } = user;
-        res.json({ success: true, user: userWithoutPassword });
+        if (!req.user?.id) return res.status(401).json({ success: false, message: 'Unauthorized' });
+        // verifyToken already validates and loads current auth user.
+        res.json({ success: true, user: req.user });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Failed to fetch user' });
     }

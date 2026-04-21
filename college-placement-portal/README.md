@@ -39,3 +39,24 @@ cd frontend
 npm install
 npm run dev
 ```
+
+## Production Deployment
+
+For production setup and release steps, use:
+
+- `DEPLOYMENT.md`
+
+Quick summary:
+
+```bash
+# backend
+cd backend
+npm ci
+npm run build
+npm run start:prod
+
+# frontend
+cd ../frontend
+npm ci
+npm run build
+```

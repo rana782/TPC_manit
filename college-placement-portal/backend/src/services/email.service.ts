@@ -12,7 +12,8 @@ const logger = winston.createLogger({
     ]
 });
 
-export const sendOTP = async (email: string, otp: string) => {
+/** Returns false if SMTP send failed (caller should surface a 503 / retry). */
+export const sendOTP = async (email: string, otp: string): Promise<boolean> => {
     if (process.env.NODE_ENV === 'test') {
         logger.info(`[TEST EMAIL SERVICE] OTP ${otp} prepared for ${email}`);
         return true;
@@ -49,13 +50,18 @@ export const sendOTP = async (email: string, otp: string) => {
         </div>
     `;
 
-    await transporter.sendMail({
-        from,
-        to: email,
-        subject: 'College Placement Portal - Verify your email',
-        text: `Your OTP is: ${otp}. It is valid for 8 minutes.`,
-        html,
-    });
+    try {
+        await transporter.sendMail({
+            from,
+            to: email,
+            subject: 'College Placement Portal - Verify your email',
+            text: `Your OTP is: ${otp}. It is valid for 8 minutes.`,
+            html,
+        });
+    } catch (err) {
+        logger.error(`[EMAIL] OTP send failed for ${email}`, err);
+        return false;
+    }
 
     logger.info(`OTP email sent to ${email}`);
     return true;

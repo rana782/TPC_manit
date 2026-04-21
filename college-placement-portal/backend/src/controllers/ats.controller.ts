@@ -249,10 +249,30 @@ export const scoreHandler = async (req: Request, res: Response): Promise<void> =
     }
 };
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 // POST /api/ats/score-absolute
-// Body: { resumeId: string } — resume-only ATS readiness (0–100), no job description
+// Body: { resumeId: string, stream?: boolean } — resume-only ATS readiness (0–100), no job description
+// When stream is true (or query ?stream=1), responds with NDJSON: status → partial → done
 export const absoluteScoreHandler = async (req: Request, res: Response): Promise<void> => {
+    const streamNdjson =
+        req.body?.stream === true ||
+        req.body?.stream === 'true' ||
+        req.query?.stream === '1' ||
+        req.query?.stream === 'true';
+
     try {
+        let clientClosed = false;
+        req.on('close', () => {
+            clientClosed = true;
+        });
+        const ensureClientOpen = () => {
+            if (clientClosed) {
+                const err = new Error('client disconnected');
+                (err as any).code = 'CLIENT_ABORT';
+                throw err;
+            }
+        };
         const userId = (req as any).user?.id;
         if (!userId) {
             res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -290,27 +310,86 @@ export const absoluteScoreHandler = async (req: Request, res: Response): Promise
         }
 
         const resumeForParser = buildResumeInputForAtsParser(resumeMeta);
+
+        const buildPayload = (parsedResume: Awaited<ReturnType<typeof parseResumeWithLlm>>, result: Awaited<ReturnType<typeof getAbsoluteResumeAnalysis>>) => ({
+            resumeId: resume.id,
+            score: result.score,
+            explanation: result.explanation,
+            strengths: result.strengths ?? [],
+            suggestions: result.suggestions || [],
+            engine: result.provider,
+            llmModel: result.provider === 'llm' ? result.model : undefined,
+            parserModel: parsedResume.model,
+            resumeTextSource: resumeMeta.source,
+            resumeTextLength: resumeMeta.length,
+            analysisType: 'absolute' as const,
+        });
+
+        if (streamNdjson) {
+            res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            (res as any).flushHeaders?.();
+
+            const writeLine = (obj: unknown) => {
+                res.write(`${JSON.stringify(obj)}\n`);
+                (res as any).flush?.();
+            };
+
+            writeLine({ type: 'status', phase: 'resume', message: 'Reading resume text…' });
+            await sleep(15);
+            ensureClientOpen();
+
+            writeLine({ type: 'status', phase: 'parser', message: 'Structuring resume for scoring…' });
+            const parsedResume = await parseResumeWithLlm(resumeForParser);
+            ensureClientOpen();
+            writeLine({
+                type: 'partial',
+                data: { parserModel: parsedResume.model, resumeTextLength: resumeMeta.length },
+            });
+
+            writeLine({ type: 'status', phase: 'analysis', message: 'Computing ATS readiness score…' });
+            const result = await getAbsoluteResumeAnalysis(parsedResume.normalizedText);
+            ensureClientOpen();
+            debugLog('Absolute ATS output:', result);
+
+            const engine = result.provider === 'openai' || result.provider === 'llm' ? result.provider : 'fallback';
+            writeLine({ type: 'partial', data: { score: result.score, engine } });
+            await sleep(20);
+            writeLine({ type: 'partial', data: { explanation: result.explanation } });
+            await sleep(20);
+            writeLine({ type: 'partial', data: { strengths: result.strengths ?? [] } });
+            await sleep(20);
+            writeLine({ type: 'partial', data: { suggestions: result.suggestions || [] } });
+
+            const full = buildPayload(parsedResume, result);
+            writeLine({ type: 'done', data: full });
+            res.end();
+            return;
+        }
+
         const parsedResume = await parseResumeWithLlm(resumeForParser);
         const result = await getAbsoluteResumeAnalysis(parsedResume.normalizedText);
         debugLog('Absolute ATS output:', result);
 
         res.json({
             success: true,
-            data: {
-                resumeId: resume.id,
-                score: result.score,
-                explanation: result.explanation,
-                strengths: result.strengths ?? [],
-                suggestions: result.suggestions || [],
-                engine: result.provider,
-                llmModel: result.provider === 'llm' ? result.model : undefined,
-                parserModel: parsedResume.model,
-                resumeTextSource: resumeMeta.source,
-                resumeTextLength: resumeMeta.length,
-                analysisType: 'absolute',
-            },
+            data: buildPayload(parsedResume, result),
         });
     } catch (err: any) {
+        if (err?.code === 'CLIENT_ABORT') {
+            return;
+        }
+        if (res.headersSent) {
+            try {
+                res.write(`${JSON.stringify({ type: 'error', message: err?.message || 'Server error' })}\n`);
+            } catch {
+                /* ignore */
+            }
+            res.end();
+            return;
+        }
         res.status(500).json({ success: false, message: err.message });
     }
 };

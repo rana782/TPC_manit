@@ -7,7 +7,7 @@ const ATS_TIMEOUT_MS = Number(process.env.ATS_TIMEOUT_MS || 12000);
 /** OpenRouter + Qwen is slower; allow override via ATS_TIMEOUT_MS. */
 const OPENROUTER_MIN_TIMEOUT_MS = 60000;
 
-export type AtsLlmProvider = 'llm' | 'fallback';
+export type AtsLlmProvider = 'openai' | 'llm' | 'fallback';
 
 export interface AtsAnalysisResult extends AtsResult {
     suggestions: string[];

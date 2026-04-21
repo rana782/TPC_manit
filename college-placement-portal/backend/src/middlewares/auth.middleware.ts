@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
+const AUTH_DB_TIMEOUT_MS = Number(process.env.AUTH_DB_TIMEOUT_MS || 12000);
 
 export interface AuthRequest extends Request {
     user?: {
@@ -10,10 +11,30 @@ export interface AuthRequest extends Request {
         email: string;
         role: string;
         isVerified?: boolean;
+        verifiedAt?: string | null;
         permJobCreate?: boolean;
         permLockProfile?: boolean;
         permExportCsv?: boolean;
     };
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => {
+            const err = new Error(`${label} timed out after ${ms}ms`);
+            (err as any).code = 'AUTH_TIMEOUT';
+            reject(err);
+        }, ms);
+        promise
+            .then((value) => {
+                clearTimeout(timer);
+                resolve(value);
+            })
+            .catch((err) => {
+                clearTimeout(timer);
+                reject(err);
+            });
+    });
 }
 
 export const verifyToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -24,9 +45,15 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
     }
 
     const token = authHeader.split(' ')[1];
+    let decoded: any;
 
     try {
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
+        decoded = jwt.verify(token, JWT_SECRET) as any;
+    } catch (error) {
+        return res.status(401).json({ success: false, message: 'Invalid token' });
+    }
+
+    try {
         const decodedId =
             (typeof decoded?.id === 'string' && decoded.id.trim()) ||
             (typeof decoded?.userId === 'string' && decoded.userId.trim()) ||
@@ -43,29 +70,38 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
             isDisabled: boolean;
             disabledUntil: Date | null;
             isVerified: boolean;
+            verifiedAt: Date | null;
             permJobCreate: boolean;
             permLockProfile: boolean;
             permExportCsv: boolean;
         };
         if (decodedId) {
-            user = await prisma.user.findUnique({
-                where: { id: decodedId },
-                select: {
-                    id: true, email: true, role: true, isDisabled: true,
-                    disabledUntil: true,
-                    isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
-                }
-            });
+            user = await withTimeout(
+                prisma.user.findUnique({
+                    where: { id: decodedId },
+                    select: {
+                        id: true, email: true, role: true, isDisabled: true,
+                        disabledUntil: true,
+                        isVerified: true, verifiedAt: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
+                    }
+                }),
+                AUTH_DB_TIMEOUT_MS,
+                'Auth user lookup by id',
+            );
         }
         if (!user && decodedEmail) {
-            user = await prisma.user.findUnique({
-                where: { email: decodedEmail },
-                select: {
-                    id: true, email: true, role: true, isDisabled: true,
-                    disabledUntil: true,
-                    isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
-                }
-            });
+            user = await withTimeout(
+                prisma.user.findUnique({
+                    where: { email: decodedEmail },
+                    select: {
+                        id: true, email: true, role: true, isDisabled: true,
+                        disabledUntil: true,
+                        isVerified: true, verifiedAt: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
+                    }
+                }),
+                AUTH_DB_TIMEOUT_MS,
+                'Auth user lookup by email',
+            );
         }
 
         if (!user) {
@@ -75,14 +111,18 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
         if (user.isDisabled) {
             const now = new Date();
             if (user.disabledUntil && user.disabledUntil <= now) {
-                const reactivated = await prisma.user.update({
-                    where: { id: user.id },
-                    data: { isDisabled: false, disabledUntil: null },
-                    select: {
-                        id: true, email: true, role: true, isDisabled: true,
-                        isVerified: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
-                    }
-                });
+                const reactivated = await withTimeout(
+                    prisma.user.update({
+                        where: { id: user.id },
+                        data: { isDisabled: false, disabledUntil: null },
+                        select: {
+                            id: true, email: true, role: true, isDisabled: true,
+                            isVerified: true, verifiedAt: true, permJobCreate: true, permLockProfile: true, permExportCsv: true
+                        }
+                    }),
+                    AUTH_DB_TIMEOUT_MS,
+                    'Auth reactivation update',
+                );
                 user = { ...reactivated, disabledUntil: null };
             } else {
                 return res.status(403).json({
@@ -99,13 +139,15 @@ export const verifyToken = async (req: AuthRequest, res: Response, next: NextFun
             email: user.email,
             role: user.role,
             isVerified: user.isVerified,
+            verifiedAt: user.verifiedAt ? user.verifiedAt.toISOString() : null,
             permJobCreate: user.permJobCreate,
             permLockProfile: user.permLockProfile,
             permExportCsv: user.permExportCsv
         };
         next();
     } catch (error) {
-        return res.status(401).json({ success: false, message: 'Invalid token' });
+        // Database / Prisma failures are not token failures; keep semantics clear for frontend session handling.
+        return res.status(503).json({ success: false, message: 'Authentication service temporarily unavailable' });
     }
 };
 

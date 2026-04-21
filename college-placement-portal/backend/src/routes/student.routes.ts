@@ -5,6 +5,7 @@ import {
     uploadPhoto,
     uploadResume,
     getResumes,
+    recommendCompanies,
     deleteResume,
     setResumeActive,
     uploadDocument,
@@ -29,6 +30,7 @@ router.post('/photo', photoUpload.single('photo'), uploadPhoto);
 
 // Resumes
 router.get('/resumes', getResumes);
+router.get('/recommend-companies', recommendCompanies);
 router.post('/resume', resumeUpload.single('resume'), uploadResume);
 router.delete('/resume/:id', deleteResume);
 router.put('/resume/:id/active', setResumeActive);

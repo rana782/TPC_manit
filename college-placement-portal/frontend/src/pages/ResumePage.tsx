@@ -4,12 +4,12 @@ import { useAuth } from '../context/AuthContext';
 import {
     FileText, Upload, Trash2, ExternalLink, CheckCircle2, AlertCircle,
     Clock, Tag, ToggleLeft, ToggleRight, FileUp, X, Sparkles, Loader2,
-    ChevronRight,
+    ChevronRight, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
 import PageHeader, { LayoutContainer } from '../components/layout/PageHeader';
-import { getViteApiOrigin } from '../utils/apiBase';
+import { getViteApiBase, getViteApiOrigin } from '../utils/apiBase';
 import {
     inferIssueSeverity,
     isStructuredAtsSuggestion,
@@ -19,8 +19,12 @@ import {
     type IssueSeverity,
 } from '../utils/atsDisplay';
 
-const API = getViteApiOrigin();
 const detailPreviewHeight = 520;
+
+/** Backend origin for static links (e.g. /uploads). Empty in dev → same-origin + Vite /uploads proxy. */
+function uploadsBase(): string {
+    return getViteApiOrigin().replace(/\/+$/, '');
+}
 
 interface Resume {
     id: string;
@@ -38,6 +42,17 @@ interface AtsAnalysisResult {
     suggestions: string[];
     /** llm = Qwen via OpenRouter (or legacy openai); fallback = offline / error */
     engine?: 'llm' | 'openai' | 'fallback';
+}
+
+interface CompanyRoleRecommendation {
+    company: string;
+    role: string;
+    workType: string | null;
+    jobDescription: string | null;
+    responsibilities: string | null;
+    benefits: string | null;
+    companySector: string | null;
+    experienceRequired: string;
 }
 
 function ResumeDocumentPreview({
@@ -111,15 +126,25 @@ function AtsAnalysisPanel({
     analyzingResumeId,
     analysisElapsed,
     onAnalyze,
+    onCancel,
     analysisByResume,
+    detailCollapsed,
+    onToggleDetailCollapsed,
+    streamStatus,
 }: {
     resumeId: string;
     analyzingResumeId: string | null;
     analysisElapsed: number;
     onAnalyze: (id: string) => void;
+    onCancel: (id: string) => void;
     analysisByResume: Record<string, AtsAnalysisResult | null>;
+    detailCollapsed: boolean;
+    onToggleDetailCollapsed: () => void;
+    /** Live backend phase message while NDJSON stream is in progress */
+    streamStatus?: string | null;
 }) {
     const result = analysisByResume[resumeId];
+    const showCollapse = Boolean(result);
     return (
         <div
             className="rounded-2xl border border-violet-200/80 bg-gradient-to-br from-violet-50/90 via-white to-white p-5 shadow-sm"
@@ -136,32 +161,78 @@ function AtsAnalysisPanel({
                         Role-specific match appears when you apply to a job.
                     </p>
                 </div>
-                <button
-                    type="button"
-                    data-testid="analyze-resume-button"
-                    disabled={analyzingResumeId === resumeId}
-                    onClick={() => onAnalyze(resumeId)}
-                    className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-violet-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-violet-800 disabled:opacity-60 sm:w-auto"
-                >
-                    {analyzingResumeId === resumeId ? (
-                        <>
-                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                            Analyzing…
-                        </>
-                    ) : (
-                        <>
-                            <Sparkles className="h-4 w-4" aria-hidden />
-                            Get ATS score
-                        </>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                    {showCollapse && (
+                        <button
+                            type="button"
+                            onClick={onToggleDetailCollapsed}
+                            aria-expanded={!detailCollapsed}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 bg-white px-4 py-2.5 text-sm font-semibold text-violet-900 shadow-sm transition-colors hover:bg-violet-50 sm:w-auto"
+                        >
+                            {detailCollapsed ? (
+                                <>
+                                    <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                                    Show ATS details
+                                </>
+                            ) : (
+                                <>
+                                    <ChevronUp className="h-4 w-4 shrink-0" aria-hidden />
+                                    Hide ATS details
+                                </>
+                            )}
+                        </button>
                     )}
-                </button>
+                    <button
+                        type="button"
+                        data-testid="analyze-resume-button"
+                        disabled={analyzingResumeId === resumeId}
+                        onClick={() => onAnalyze(resumeId)}
+                        className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-violet-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-violet-800 disabled:opacity-60 sm:w-auto"
+                    >
+                        {analyzingResumeId === resumeId ? (
+                            <>
+                                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                                Analyzing…
+                            </>
+                        ) : (
+                            <>
+                                <Sparkles className="h-4 w-4" aria-hidden />
+                                Get ATS score
+                            </>
+                        )}
+                    </button>
+                    {analyzingResumeId === resumeId && (
+                        <button
+                            type="button"
+                            onClick={() => onCancel(resumeId)}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-800 shadow-sm transition-colors hover:bg-rose-100 sm:w-auto"
+                        >
+                            <X className="h-4 w-4" aria-hidden />
+                            Cancel ATS
+                        </button>
+                    )}
+                </div>
                 {analyzingResumeId === resumeId && (
                     <p className="basis-full text-xs text-slate-500 mt-1 sm:order-last">
-                        Analyzing... {analysisElapsed}s{analysisElapsed > 30 ? ' (this may take up to 3 min)' : ''}
+                        {streamStatus ? (
+                            <span className="block font-medium text-violet-700/90">{streamStatus}</span>
+                        ) : null}
+                        <span className="block">
+                            Analyzing... {analysisElapsed}s
+                            {analysisElapsed > 30 ? ' (this may take up to 3 min)' : ''}
+                        </span>
                     </p>
                 )}
             </div>
-            {result && (
+            {result && detailCollapsed && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-violet-100 bg-violet-50/60 px-3 py-2 text-sm text-violet-950">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-violet-800">Summary</span>
+                    <span className="text-lg font-bold tabular-nums text-violet-700">{Math.round(result.score)}</span>
+                    <span className="text-xs text-violet-700">/ 100</span>
+                    <span className="text-xs text-violet-600">Expand for strengths, suggestions, and detail.</span>
+                </div>
+            )}
+            {result && !detailCollapsed && (
                 <div
                     className="mt-4 space-y-3 rounded-xl border border-slate-200/80 bg-white/95 p-4 text-sm shadow-sm"
                     data-testid="resume-ats-results"
@@ -315,6 +386,182 @@ function AtsAnalysisPanel({
     );
 }
 
+function CompanyRecommendationPanel({
+    resumeId,
+    recommendingResumeId,
+    onRecommend,
+    onCancelRecommend,
+    recommendationsByResume,
+    hasFetchedRecommendationsByResume,
+    detailCollapsed,
+    onToggleDetailCollapsed,
+}: {
+    resumeId: string;
+    recommendingResumeId: string | null;
+    onRecommend: (id: string) => void;
+    onCancelRecommend: (id: string) => void;
+    recommendationsByResume: Record<string, CompanyRoleRecommendation[]>;
+    hasFetchedRecommendationsByResume: Record<string, boolean>;
+    detailCollapsed: boolean;
+    onToggleDetailCollapsed: () => void;
+}) {
+    const recommendations = recommendationsByResume[resumeId] || [];
+    const hasFetchedRecommendations = Boolean(hasFetchedRecommendationsByResume[resumeId]);
+    const streamActive = recommendingResumeId === resumeId;
+    /**
+     * Show this block while streaming, after a completed fetch, or whenever we already have rows.
+     * Do NOT tie visibility only to `hasFetched` during an in-flight request — setting `hasFetched` early
+     * before NDJSON lines are applied left `hasFetched === true` with an empty list and surfaced the
+     * empty-state panel incorrectly.
+     */
+    const showRecommendationsUi =
+        hasFetchedRecommendations || streamActive || recommendations.length > 0;
+
+    return (
+        <div className="rounded-2xl border border-sky-200/80 bg-gradient-to-br from-sky-50/80 via-white to-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 border-b border-sky-100 pb-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                <div>
+                    <p className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-sky-900">
+                        <Sparkles className="h-4 w-4 shrink-0" aria-hidden />
+                        Quick company ranking
+                    </p>
+                    <p className="max-w-xl text-[11px] leading-relaxed text-slate-600">
+                        Fast deterministic ranking from resume skills (including project skills) against job catalog.
+                    </p>
+                </div>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                    {showRecommendationsUi && (
+                        <button
+                            type="button"
+                            onClick={onToggleDetailCollapsed}
+                            aria-expanded={!detailCollapsed}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-sky-200 bg-white px-4 py-2.5 text-sm font-semibold text-sky-900 shadow-sm transition-colors hover:bg-sky-50 sm:w-auto"
+                        >
+                            {detailCollapsed ? (
+                                <>
+                                    <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                                    Show recommendations
+                                </>
+                            ) : (
+                                <>
+                                    <ChevronUp className="h-4 w-4 shrink-0" aria-hidden />
+                                    Hide recommendations
+                                </>
+                            )}
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        data-testid="recommend-companies-button"
+                        disabled={streamActive}
+                        onClick={() => onRecommend(resumeId)}
+                        className="inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-sky-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-sky-800 disabled:opacity-60 sm:w-auto"
+                    >
+                        {streamActive ? (
+                            <>
+                                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                                Ranking...
+                            </>
+                        ) : (
+                            <>
+                                <Sparkles className="h-4 w-4" aria-hidden />
+                                Run quick ranking
+                            </>
+                        )}
+                    </button>
+                    {streamActive && (
+                        <button
+                            type="button"
+                            onClick={() => onCancelRecommend(resumeId)}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-800 shadow-sm transition-colors hover:bg-rose-100 sm:w-auto"
+                        >
+                            <X className="h-4 w-4" aria-hidden />
+                            Cancel fetch
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {showRecommendationsUi && detailCollapsed && recommendations.length > 0 && (
+                <div className="mt-3 rounded-lg border border-sky-100 bg-sky-50/60 px-3 py-2 text-sm text-sky-950">
+                    <span className="font-semibold tabular-nums">{recommendations.length}</span>
+                    <span className="text-sky-800">
+                        {' '}
+                        role match{recommendations.length === 1 ? '' : 'es'}
+                        {streamActive ? ' so far — expand for live details.' : ' loaded — expand to review companies and fit.'}
+                    </span>
+                </div>
+            )}
+            {showRecommendationsUi &&
+                detailCollapsed &&
+                hasFetchedRecommendations &&
+                !streamActive &&
+                recommendations.length === 0 && (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                    No matches from the last run — expand for tips, or run recommendations again.
+                </div>
+            )}
+
+            {showRecommendationsUi && !detailCollapsed && recommendations.length > 0 && (
+                <div
+                    className="mt-4 rounded-xl border border-slate-200/80 bg-white/95 p-4 shadow-sm"
+                    data-testid="company-recommendations-live-list"
+                >
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Top matches
+                    </p>
+                    <ul className="space-y-2">
+                        {recommendations.map((r, i) => (
+                            <li
+                                key={`${resumeId}-${r.company}-${r.role}-${i}`}
+                                className="rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2"
+                            >
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <span className="text-sm font-semibold text-slate-900">{r.company}</span>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold text-sky-900">
+                                            {r.role}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                    {r.companySector && (
+                                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                                            {r.companySector}
+                                        </span>
+                                    )}
+                                    {r.workType && (
+                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                                            {r.workType}
+                                        </span>
+                                    )}
+                                </div>
+                                {r.benefits && (
+                                    <p className="mt-2 text-xs leading-relaxed text-slate-700">
+                                        <span className="font-semibold text-slate-800">Benefits: </span>
+                                        {r.benefits}
+                                    </p>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+            {showRecommendationsUi &&
+                !detailCollapsed &&
+                hasFetchedRecommendations &&
+                !streamActive &&
+                recommendations.length === 0 && (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-white/95 p-4 text-sm text-slate-600 shadow-sm">
+                    No company-role matches found for this resume yet. Try adding more skills or a target role, then run
+                    recommendations again.
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function ResumePage() {
     const { token } = useAuth();
     const [resumes, setResumes] = useState<Resume[]>([]);
@@ -328,11 +575,24 @@ export default function ResumePage() {
     const [uploadProgress, setUploadProgress] = useState(0);
     const [dragOver, setDragOver] = useState(false);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+    /** Prevents double-submit and shows progress on Confirm delete. */
+    const [deletingResumeId, setDeletingResumeId] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [analysisByResume, setAnalysisByResume] = useState<Record<string, AtsAnalysisResult | null>>({});
     const [analyzingResumeId, setAnalyzingResumeId] = useState<string | null>(null);
     const [analysisElapsed, setAnalysisElapsed] = useState(0);
     const analysisTimerRef = useRef<number | null>(null);
+    const atsAbortRef = useRef<Record<string, AbortController>>({});
+    const [recommendationsByResume, setRecommendationsByResume] = useState<Record<string, CompanyRoleRecommendation[]>>({});
+    const [recommendingResumeId, setRecommendingResumeId] = useState<string | null>(null);
+    const recommendAbortRef = useRef<Record<string, AbortController>>({});
+    const recommendHotCacheRef = useRef<Map<string, { expiresAt: number; items: CompanyRoleRecommendation[] }>>(new Map());
+    const [hasFetchedRecommendationsByResume, setHasFetchedRecommendationsByResume] = useState<Record<string, boolean>>({});
+    /** When true, long ATS results are hidden (per resume id). */
+    const [atsDetailCollapsedByResume, setAtsDetailCollapsedByResume] = useState<Record<string, boolean>>({});
+    /** When true, recommendation list / empty state is hidden (per resume id). */
+    const [recommendDetailCollapsedByResume, setRecommendDetailCollapsedByResume] = useState<Record<string, boolean>>({});
+    const [atsStreamStatusByResume, setAtsStreamStatusByResume] = useState<Record<string, string | null>>({});
 
     const headers = { Authorization: `Bearer ${token}` };
     const clearMessages = (isError = false) => {
@@ -342,13 +602,30 @@ export default function ResumePage() {
         }, isError ? 8000 : 3000);
     };
 
-    const fetchResumes = async () => {
+    const recommendCacheKey = (resumeId: string, roleFilter: string) =>
+        `v5|${resumeId}|${roleFilter.trim().toLowerCase()}`;
+
+    useEffect(() => {
+        return () => {
+            Object.values(atsAbortRef.current).forEach((c) => c.abort());
+            Object.values(recommendAbortRef.current).forEach((c) => c.abort());
+        };
+    }, []);
+
+    const fetchResumes = async (opts?: { quiet?: boolean }) => {
         try {
-            const res = await axios.get(`${API}/api/student/resumes`, { headers });
+            const res = await axios.get(`${getViteApiBase()}/student/resumes`, {
+                headers,
+                params: { _t: Date.now() },
+            });
             setResumes(res.data.data || []);
         } catch (err: any) {
-            setError(err.response?.data?.message || 'Failed to fetch resumes.');
-            clearMessages(true);
+            if (!opts?.quiet) {
+                setError(err.response?.data?.message || 'Failed to fetch resumes.');
+                clearMessages(true);
+            } else {
+                console.warn('[ResumePage] fetchResumes (quiet) failed:', err?.response?.data?.message || err?.message);
+            }
         } finally {
             setLoading(false);
         }
@@ -368,55 +645,219 @@ export default function ResumePage() {
 
     const selectedResume = resumes.find((r) => r.id === selectedId) ?? null;
 
+    const cancelAnalyzeResume = (resumeId: string) => {
+        const controller = atsAbortRef.current[resumeId];
+        if (!controller) return;
+        controller.abort();
+        delete atsAbortRef.current[resumeId];
+        if (analysisTimerRef.current) {
+            window.clearInterval(analysisTimerRef.current);
+            analysisTimerRef.current = null;
+        }
+        setAnalysisElapsed(0);
+        setAnalyzingResumeId(null);
+        setAtsStreamStatusByResume((prev) => ({ ...prev, [resumeId]: null }));
+        setSuccess('ATS analysis cancelled.');
+        clearMessages();
+    };
+
     const handleAnalyzeResume = async (resumeId: string) => {
+        if (!token) {
+            setError('Not signed in. Please log in again.');
+            clearMessages(true);
+            return;
+        }
         setError('');
         setSuccess('');
         setAnalyzingResumeId(resumeId);
+        setAtsStreamStatusByResume((prev) => ({ ...prev, [resumeId]: 'Starting…' }));
         setAnalysisElapsed(0);
         analysisTimerRef.current = window.setInterval(() => {
             setAnalysisElapsed((prev) => prev + 1);
         }, 1000);
+        const controller = new AbortController();
+        atsAbortRef.current[resumeId] = controller;
         try {
-            const res = await axios.post(
-                `${API}/api/ats/score-absolute`,
-                { resumeId },
-                { headers, timeout: 180000 }
-            );
-            if (res.data?.success && res.data?.data) {
-                const d = res.data.data;
-                setAnalysisByResume((prev) => ({
-                    ...prev,
-                    [resumeId]: {
-                        score: typeof d.score === 'number' ? d.score : 0,
-                        explanation: d.explanation ?? '',
-                        strengths: Array.isArray(d.strengths) ? d.strengths : [],
-                        suggestions: Array.isArray(d.suggestions) ? d.suggestions : [],
-                        engine:
-                            d.engine === 'llm' || d.engine === 'openai' || d.engine === 'fallback'
-                                ? d.engine
-                                : undefined,
+            const res = await fetch(`${getViteApiBase()}/ats/score-absolute?stream=1`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ resumeId, stream: true }),
+                signal: controller.signal,
+            });
+
+            if (!res.ok || !res.body) {
+                throw new Error('ATS stream unavailable');
+            }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let gotFinal = false;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const raw of lines) {
+                    const line = raw.trim();
+                    if (!line) continue;
+                    let msg: any;
+                    try {
+                        msg = JSON.parse(line);
+                    } catch {
+                        continue;
                     }
-                }));
+                    if (msg.type === 'status' && msg.message) {
+                        setAtsStreamStatusByResume((prev) => ({ ...prev, [resumeId]: String(msg.message) }));
+                        continue;
+                    }
+                    if (msg.type === 'error') {
+                        throw new Error(String(msg.message || 'ATS stream failed'));
+                    }
+                    if (msg.type === 'done' && msg.data) {
+                        const d = msg.data;
+                        setAnalysisByResume((prev) => ({
+                            ...prev,
+                            [resumeId]: {
+                                score: typeof d.score === 'number' ? d.score : 0,
+                                explanation: d.explanation ?? '',
+                                strengths: Array.isArray(d.strengths) ? d.strengths : [],
+                                suggestions: Array.isArray(d.suggestions) ? d.suggestions : [],
+                                engine:
+                                    d.engine === 'llm' || d.engine === 'openai' || d.engine === 'fallback'
+                                        ? d.engine
+                                        : undefined,
+                            },
+                        }));
+                        gotFinal = true;
+                    }
+                }
+            }
+
+            if (gotFinal) {
+                setAtsDetailCollapsedByResume((prev) => ({ ...prev, [resumeId]: false }));
                 setSuccess('Standalone ATS score ready.');
                 clearMessages();
             } else {
-                setError(res.data?.message || 'Analysis failed.');
-                clearMessages(true);
+                throw new Error('ATS result missing from stream.');
             }
         } catch (err: any) {
-            if (err?.code === 'ECONNABORTED') {
-                setError('ATS analysis is taking longer than expected. Please retry in a few seconds.');
-            } else {
-                setError(err.response?.data?.message || 'Could not analyze resume. Try again.');
+            if (err?.name === 'AbortError') {
+                return;
             }
+            setError(err?.message || 'Could not analyze resume. Try again.');
             clearMessages(true);
         } finally {
             if (analysisTimerRef.current) {
                 window.clearInterval(analysisTimerRef.current);
                 analysisTimerRef.current = null;
             }
+            delete atsAbortRef.current[resumeId];
             setAnalysisElapsed(0);
             setAnalyzingResumeId(null);
+            setAtsStreamStatusByResume((prev) => ({ ...prev, [resumeId]: null }));
+        }
+    };
+
+    const cancelRecommendCompanies = (resumeId: string) => {
+        const controller = recommendAbortRef.current[resumeId];
+        if (!controller) return;
+        controller.abort();
+        delete recommendAbortRef.current[resumeId];
+        setRecommendingResumeId(null);
+        setSuccess('Quick ranking cancelled.');
+        clearMessages();
+    };
+
+    const handleRecommendCompanies = async (resumeId: string) => {
+        if (!token) {
+            setError('Not signed in. Please log in again.');
+            clearMessages(true);
+            return;
+        }
+        const requestedLimit = 10;
+        setError('');
+        setSuccess('');
+        setRecommendingResumeId(resumeId);
+        setHasFetchedRecommendationsByResume((prev) => ({ ...prev, [resumeId]: false }));
+        setRecommendationsByResume((prev) => ({ ...prev, [resumeId]: [] }));
+        setRecommendDetailCollapsedByResume((prev) => ({ ...prev, [resumeId]: false }));
+        const roleFilter = '';
+        const cacheKey = recommendCacheKey(resumeId, roleFilter);
+        const cached = recommendHotCacheRef.current.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+            const quick = cached.items.slice(0, requestedLimit);
+            setRecommendationsByResume((prev) => ({ ...prev, [resumeId]: quick }));
+            setHasFetchedRecommendationsByResume((prev) => ({ ...prev, [resumeId]: true }));
+            setRecommendingResumeId(null);
+            setSuccess('Loaded cached quick ranking.');
+            clearMessages();
+            return;
+        }
+        const controller = new AbortController();
+        recommendAbortRef.current[resumeId] = controller;
+        try {
+            const qs = new URLSearchParams({
+                resumeId,
+                limit: String(requestedLimit),
+            });
+            const res = await fetch(`${getViteApiBase()}/student/recommend-companies?${qs.toString()}`, {
+                method: 'GET',
+                headers: { Authorization: `Bearer ${token}` },
+                signal: controller.signal,
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || 'Quick ranking failed');
+            }
+            const payload = await res.json();
+            if (!payload?.success || !Array.isArray(payload?.data)) {
+                throw new Error(payload?.message || 'Quick ranking failed');
+            }
+            const mapped = payload.data
+                .map((item: any) => ({
+                    company: String(item?.company || '').trim(),
+                    role: String(item?.role || '').trim(),
+                    workType: item?.workType ? String(item.workType).trim() : null,
+                    jobDescription: item?.jobDescription ? String(item.jobDescription).trim() : null,
+                    responsibilities: item?.responsibilities ? String(item.responsibilities).trim() : null,
+                    benefits: item?.benefits ? String(item.benefits).trim() : null,
+                    companySector: item?.companySector ? String(item.companySector).trim() : null,
+                    experienceRequired: item?.experienceRequired
+                        ? String(item.experienceRequired).trim()
+                        : 'Experience not specified',
+                }))
+                .filter((item: CompanyRoleRecommendation) => item.company.length > 0 && item.role.length > 0)
+                .slice(0, 10);
+
+            setRecommendationsByResume((prev) => ({ ...prev, [resumeId]: mapped }));
+            setHasFetchedRecommendationsByResume((prev) => ({ ...prev, [resumeId]: true }));
+            setRecommendDetailCollapsedByResume((prev) => ({ ...prev, [resumeId]: false }));
+            if (mapped.length > 0) {
+                recommendHotCacheRef.current.set(cacheKey, {
+                    expiresAt: Date.now() + 10 * 60 * 1000,
+                    items: mapped,
+                });
+                setSuccess('Quick ranking is ready.');
+                clearMessages();
+            } else {
+                setError('No recommendations found for this resume right now.');
+                clearMessages(true);
+            }
+        } catch (err: any) {
+            if (err?.name === 'AbortError') return;
+            setHasFetchedRecommendationsByResume((prev) => ({ ...prev, [resumeId]: false }));
+            setRecommendationsByResume((prev) => ({ ...prev, [resumeId]: [] }));
+            setError(err?.message || 'Could not fetch quick ranking.');
+            clearMessages(true);
+        } finally {
+            delete recommendAbortRef.current[resumeId];
+            setRecommendingResumeId(null);
         }
     };
 
@@ -428,7 +869,7 @@ export default function ResumePage() {
         data.append('resume', file);
         data.append('roleName', roleName);
         try {
-            await axios.post(`${API}/api/student/resume`, data, {
+            await axios.post(`${getViteApiBase()}/student/resume`, data, {
                 headers: { ...headers, 'Content-Type': 'multipart/form-data' },
                 onUploadProgress: (e) => {
                     if (e.total) setUploadProgress(Math.round((e.loaded / e.total) * 100));
@@ -448,21 +889,51 @@ export default function ResumePage() {
     };
 
     const handleDelete = async (id: string) => {
+        if (!token) {
+            setError('Not signed in. Please log in again.');
+            clearMessages(true);
+            return;
+        }
+        if (deletingResumeId) return;
+
+        const authHeaders = { Authorization: `Bearer ${token}` };
+        const encodedId = encodeURIComponent(id);
+        setDeletingResumeId(id);
+        setError('');
+        setSuccess('');
         try {
-            await axios.delete(`${API}/api/student/resume/${id}`, { headers });
-            setSuccess('Resume deleted.');
+            await axios.delete(`${getViteApiBase()}/student/resume/${encodedId}`, {
+                headers: authHeaders,
+                timeout: 20000,
+            });
             setDeleteConfirm(null);
-            fetchResumes();
+            setResumes((prev) => prev.filter((r) => r.id !== id));
+            setAnalysisByResume((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+            });
+            setRecommendationsByResume((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+            });
+            setSuccess('Resume deleted.');
+            // Do not treat a post-delete list refresh failure as "delete failed" (misleading UX).
+            await fetchResumes({ quiet: true });
             clearMessages();
         } catch (err: any) {
-            setError(err.response?.data?.message || 'Delete failed.');
+            setDeleteConfirm(null);
+            setError(err.response?.data?.message || err.message || 'Delete failed.');
             clearMessages(true);
+        } finally {
+            setDeletingResumeId(null);
         }
     };
 
     const handleToggleActive = async (id: string) => {
         try {
-            const res = await axios.put(`${API}/api/student/resume/${id}/active`, {}, { headers });
+            const res = await axios.put(`${getViteApiBase()}/student/resume/${id}/active`, {}, { headers });
             setResumes(prev => prev.map(r => r.id === id ? { ...r, isActive: res.data.data.isActive } : r));
         } catch {
             setError('Failed to update resume status.');
@@ -793,7 +1264,11 @@ export default function ResumePage() {
                                         </div>
                                         <div className="flex flex-wrap gap-2">
                                             <a
-                                                href={`${API}${selectedResume.fileUrl}`}
+                                                href={
+                                                    uploadsBase()
+                                                        ? `${uploadsBase()}${selectedResume.fileUrl}`
+                                                        : selectedResume.fileUrl
+                                                }
                                                 target="_blank"
                                                 rel="noreferrer"
                                                 className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50"
@@ -822,15 +1297,28 @@ export default function ResumePage() {
                                                 <span className="flex items-center gap-1">
                                                     <button
                                                         type="button"
-                                                        onClick={() => handleDelete(selectedResume.id)}
-                                                        className="rounded-xl bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700"
+                                                        disabled={deletingResumeId === selectedResume.id}
+                                                        onClick={(e) => {
+                                                            e.preventDefault();
+                                                            e.stopPropagation();
+                                                            void handleDelete(selectedResume.id);
+                                                        }}
+                                                        className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                        Confirm delete
+                                                        {deletingResumeId === selectedResume.id ? (
+                                                            <>
+                                                                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                                                                Deleting…
+                                                            </>
+                                                        ) : (
+                                                            'Confirm delete'
+                                                        )}
                                                     </button>
                                                     <button
                                                         type="button"
+                                                        disabled={deletingResumeId === selectedResume.id}
                                                         onClick={() => setDeleteConfirm(null)}
-                                                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                                                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
                                                         Cancel
                                                     </button>
@@ -857,7 +1345,7 @@ export default function ResumePage() {
                                 <div className="overflow-hidden bg-slate-100/80">
                                     <ResumeDocumentPreview
                                         resume={selectedResume}
-                                        apiOrigin={API}
+                                        apiOrigin={getViteApiOrigin()}
                                         height={detailPreviewHeight}
                                     />
                                 </div>
@@ -868,7 +1356,31 @@ export default function ResumePage() {
                                 analyzingResumeId={analyzingResumeId}
                                 analysisElapsed={analysisElapsed}
                                 onAnalyze={handleAnalyzeResume}
+                                onCancel={cancelAnalyzeResume}
                                 analysisByResume={analysisByResume}
+                                detailCollapsed={atsDetailCollapsedByResume[selectedResume.id] ?? false}
+                                onToggleDetailCollapsed={() =>
+                                    setAtsDetailCollapsedByResume((prev) => ({
+                                        ...prev,
+                                        [selectedResume.id]: !prev[selectedResume.id],
+                                    }))
+                                }
+                                streamStatus={atsStreamStatusByResume[selectedResume.id] ?? null}
+                            />
+                            <CompanyRecommendationPanel
+                                resumeId={selectedResume.id}
+                                recommendingResumeId={recommendingResumeId}
+                                onRecommend={handleRecommendCompanies}
+                                onCancelRecommend={cancelRecommendCompanies}
+                                recommendationsByResume={recommendationsByResume}
+                                hasFetchedRecommendationsByResume={hasFetchedRecommendationsByResume}
+                                detailCollapsed={recommendDetailCollapsedByResume[selectedResume.id] ?? false}
+                                onToggleDetailCollapsed={() =>
+                                    setRecommendDetailCollapsedByResume((prev) => ({
+                                        ...prev,
+                                        [selectedResume.id]: !prev[selectedResume.id],
+                                    }))
+                                }
                             />
                         </>
                     )}

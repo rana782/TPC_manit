@@ -30,7 +30,12 @@ export default function ForgotPassword() {
             setMessage(res.data.message);
             setStep(2);
         } catch (err: any) {
-            setError('Failed to request OTP. Please try again.');
+            const msg =
+                err?.response?.data?.message ||
+                (err?.code === 'ERR_NETWORK' ? 'Cannot reach the API. Is the backend running on port 5001?' : null) ||
+                err?.message ||
+                'Failed to request OTP. Please try again.';
+            setError(String(msg));
         } finally {
             setLoading(false);
         }

@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import AuthLayout from '../components/ui/AuthLayout';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import { getViteApiOrigin } from '../utils/apiBase';
+import { getViteApiBase } from '../utils/apiBase';
 
 export default function Login() {
     const [email, setEmail] = useState('');
@@ -22,7 +22,7 @@ export default function Login() {
         setError('');
         setLoading(true);
         try {
-            const res = await axios.post(`${getViteApiOrigin()}/api/auth/login`, {
+            const res = await axios.post(`${getViteApiBase()}/auth/login`, {
                 email,
                 password
             });
@@ -31,7 +31,14 @@ export default function Login() {
                 navigate('/dashboard');
             }
         } catch (err: any) {
-            setError(err.response?.data?.message || 'Login failed. Please try again.');
+            const msg =
+                err?.response?.data?.message ||
+                (err?.code === 'ERR_NETWORK'
+                    ? 'Cannot reach the API. Is the backend running on port 5001?'
+                    : null) ||
+                err?.message ||
+                'Login failed. Please try again.';
+            setError(String(msg));
         } finally {
             setLoading(false);
         }

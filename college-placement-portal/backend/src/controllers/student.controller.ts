@@ -15,7 +15,30 @@ function unlinkUploadRelative(relPath: string | null | undefined) {
 }
 import { getResumeTextForAtsWithMeta } from './ats.controller';
 import { getUploadNanonetsBudgetMs } from '../services/document.service';
+import { getRecommendedCompanyRoleDetails, getRecommendedCompanyRoleDetailsDebug } from '../services/companyRecommendation.service';
 import prisma from '../lib/prisma';
+
+const DB_TIMEOUT_MS = 15000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => {
+            const err = new Error(`${label} timed out after ${ms}ms`);
+            (err as any).code = 'DB_TIMEOUT';
+            reject(err);
+        }, ms);
+
+        promise
+            .then((value) => {
+                clearTimeout(timer);
+                resolve(value);
+            })
+            .catch((err) => {
+                clearTimeout(timer);
+                reject(err);
+            });
+    });
+}
 
 const BRANCH_OPTIONS = ['CSE', 'ECE', 'MDS', 'EE', 'Mech', 'Civil', 'MME', 'Chem'] as const;
 const COURSE_OPTIONS = ['BTech', 'MTech', 'MCA', 'Dual Degree'] as const;
@@ -272,7 +295,57 @@ export const getResumes = async (req: Request, res: Response): Promise<void> => 
             orderBy: { createdAt: 'desc' },
         });
 
+        res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate');
         res.json({ success: true, data: resumes });
+    } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// GET /api/student/recommend-companies?resumeId=<id>&limit=<n>&role=<role>
+export const recommendCompanies = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = (req as any).user?.id;
+        if (!userId) {
+            res.status(401).json({ success: false, message: 'Unauthorized' });
+            return;
+        }
+
+        const resumeId = typeof req.query.resumeId === 'string' ? req.query.resumeId.trim() : '';
+        if (!resumeId) {
+            res.status(400).json({ success: false, message: 'resumeId is required' });
+            return;
+        }
+
+        const parsedLimit = Number(req.query.limit);
+        const limit = Number.isFinite(parsedLimit) ? parsedLimit : 10;
+        const roleFilter = typeof req.query.role === 'string' ? req.query.role.trim() : '';
+
+        const student = await prisma.student.findUnique({ where: { userId }, select: { id: true } });
+        if (!student) {
+            res.status(404).json({ success: false, message: 'Profile not found' });
+            return;
+        }
+
+        const debugMode = String(req.query.debug || '').trim() === '1';
+        if (debugMode) {
+            const result = await getRecommendedCompanyRoleDetailsDebug({
+                studentId: student.id,
+                resumeId,
+                limit,
+                roleFilter,
+            });
+            res.json({ success: true, data: result.recommendations, debug: result.debug });
+            return;
+        }
+
+        const recommendations = await getRecommendedCompanyRoleDetails({
+            studentId: student.id,
+            resumeId,
+            limit,
+            roleFilter,
+        });
+        res.json({ success: true, data: recommendations });
     } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
     }
@@ -284,18 +357,52 @@ export const deleteResume = async (req: Request, res: Response): Promise<void> =
         const userId = (req as any).user?.id;
         if (!userId) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
 
-        const student = await prisma.student.findUnique({ where: { userId } });
+        const student = await withTimeout(
+            prisma.student.findUnique({ where: { userId } }),
+            DB_TIMEOUT_MS,
+            'Lookup student profile',
+        );
         if (!student) { res.status(404).json({ success: false, message: 'Profile not found' }); return; }
 
-        const resume = await prisma.resume.findFirst({
-            where: { id: req.params.id, studentId: student.id },
-        });
+        const resumeId = String(req.params.id || '').trim();
+        if (!resumeId) {
+            res.status(400).json({ success: false, message: 'Resume id is required' });
+            return;
+        }
+
+        const resume = await withTimeout(
+            prisma.resume.findFirst({
+                where: { id: resumeId, studentId: student.id },
+            }),
+            DB_TIMEOUT_MS,
+            'Lookup resume',
+        );
         if (!resume) { res.status(404).json({ success: false, message: 'Resume not found' }); return; }
 
-        await prisma.resume.delete({ where: { id: resume.id } });
+        await withTimeout(
+            prisma.$transaction(
+                async (tx) => {
+                    await tx.jobApplication.deleteMany({ where: { resumeId: resume.id } });
+                    await tx.resume.delete({ where: { id: resume.id } });
+                },
+                { maxWait: 5000, timeout: DB_TIMEOUT_MS },
+            ),
+            DB_TIMEOUT_MS + 1000,
+            'Delete resume transaction',
+        );
+
+        unlinkUploadRelative(resume.fileUrl);
         res.json({ success: true, message: 'Resume deleted' });
     } catch (err: any) {
-        res.status(500).json({ success: false, message: err.message });
+        const code = err?.code || err?.meta?.code;
+        const msg =
+            code === 'P2003' || code === 'P2014'
+                ? 'Cannot delete this resume while it is still linked to applications. Try again or contact support.'
+                : code === 'DB_TIMEOUT' || code === 'P1001'
+                    ? 'Database is not responding right now. Please retry in a few seconds.'
+                : err?.message || 'Failed to delete resume';
+        console.error('[student/resume] delete failed', { code, message: err?.message });
+        res.status(code === 'DB_TIMEOUT' || code === 'P1001' ? 504 : 500).json({ success: false, message: msg });
     }
 };
 

@@ -436,3 +436,39 @@ model Alumni {
   companyName    String
   createdAt      DateTime @default(now())
 }
+
+/// External job catalog used for company/role recommendations (CSV import).
+model JobCatalog {
+  id                   String   @id @default(uuid())
+  sourceKey            String   @unique
+  externalJobId        String?
+  company              String
+  role                 String
+  jobTitle             String?
+  skillsText           String?  @db.Text
+  skillsArr            String[] @default([])
+  jobDescription       String?  @db.Text
+  responsibilities     String?  @db.Text
+  experienceText       String?
+  minExperience        Int?
+  maxExperience        Int?
+  workType             String?
+  location             String?
+  country              String?
+  salaryRange          String?
+  preference           String?
+  companySize          Int?
+  benefitsText         String?  @db.Text
+  companyProfileText   String?  @db.Text
+  companySector        String?
+  source               String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([company])
+  @@index([role])
+  @@index([minExperience])
+  @@index([maxExperience])
+  @@index([companySector])
+  @@index([skillsArr], type: Gin)
+}
