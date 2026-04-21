@@ -10,7 +10,7 @@
     "build": "tsc",
     "start": "node dist/src/server.js",
     "db:deploy": "prisma migrate deploy",
-    "start:prod": "npm run db:deploy && node dist/src/server.js",
+    "start:prod": "node dist/src/server.js",
     "test": "jest",
     "migrate": "prisma migrate dev",
     "seed": "prisma db seed",

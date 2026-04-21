@@ -4,7 +4,8 @@ import { ensureCompanyProfilesImported } from './services/companyJsonImport.serv
 import { ensureSupabaseBaselineSeed } from './services/baselineSeed.service';
 import prisma from './lib/prisma';
 
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT || 5000);
+const HOST = '0.0.0.0';
 
 const baselineLogger = {
     info: (m: string) => logger.info(m),
@@ -12,8 +13,8 @@ const baselineLogger = {
     error: (m: string, e?: unknown) => logger.error(e != null ? `${m} ${String(e)}` : m),
 };
 
-app.listen(PORT, () => {
-    logger.info(`Server is running on http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+    logger.info(`Server is running on http://${HOST}:${PORT}`);
     void ensureCompanyProfilesImported(prisma)
         .catch((e) => logger.error('ensureCompanyProfilesImported', e))
         .then(() => ensureSupabaseBaselineSeed(prisma, baselineLogger))
