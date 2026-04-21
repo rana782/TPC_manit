@@ -43,6 +43,7 @@ import seedRoutes from './routes/seed.routes';
 import companyRatingRoutes from './routes/companyRating.routes';
 import companyProfileRoutes from './routes/companyProfile.routes';
 import { getAtsChatModel, getAtsChatModelCandidates, getAtsLlmBaseUrl, getAtsLlmApiKey } from './utils/env';
+import prisma from './lib/prisma';
 
 app.get('/api/health', (req: Request, res: Response) => {
     logger.info('Health check accessed');
@@ -62,6 +63,27 @@ app.get('/api/health', (req: Request, res: Response) => {
             atsLlmModelCandidates: getAtsChatModelCandidates(),
         },
     });
+});
+
+app.get('/api/health/db', async (_req: Request, res: Response) => {
+    logger.info('DB health check accessed');
+    try {
+        await prisma.$queryRaw`SELECT 1`;
+        res.json({
+            success: true,
+            data: {
+                status: 'Healthy',
+                database: 'Connected',
+            },
+        });
+    } catch (err: any) {
+        logger.error('DB health check failed', err);
+        res.status(503).json({
+            success: false,
+            message: 'Database unavailable',
+            error: String(err?.message || 'Unknown database error'),
+        });
+    }
 });
 
 app.use('/api/auth', authRoutes);
