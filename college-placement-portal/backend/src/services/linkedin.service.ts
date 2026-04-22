@@ -89,8 +89,8 @@ export const publishLinkedInAnnouncement = async (
     }
 
     // 2. Build placed_students array from PlacementRecord + Student
-    const placedStudents: PlacedStudentInfo[] = job.placements.map(pr => ({
-        name: `${pr.student.firstName} ${pr.student.lastName}`.trim(),
+    const placedStudents: PlacedStudentInfo[] = job.placements.map((pr) => ({
+        name: `${pr.student.firstName ?? ''} ${pr.student.lastName ?? ''}`.trim() || 'Student',
         branch: pr.student.branch || 'N/A',
         linkedin_url: pr.student.linkedin || '',
         role: pr.role,
