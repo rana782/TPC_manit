@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { getViteApiBase } from '../utils/apiBase';
+import { TPC_ELIGIBLE_BRANCHES } from '../constants/tpcBranches';
 import {
     ExternalLink,
     Search,
@@ -104,10 +105,7 @@ export default function AlumniPage() {
         void fetchAllForFilters();
     }, [token, apiBase, headers]);
 
-    const branchOptions = useMemo(() => {
-        const opts = Array.from(new Set(allRows.map((r) => r.branch).filter(Boolean))).sort();
-        return ['All', ...opts];
-    }, [allRows]);
+    const branchOptions = useMemo(() => ['All', ...TPC_ELIGIBLE_BRANCHES], []);
 
     const yearOptions = useMemo(() => {
         const opts = Array.from(new Set(allRows.map((r) => String(r.placementYear || '')).filter(Boolean))).sort(
@@ -120,6 +118,10 @@ export default function AlumniPage() {
     const ctcValues = rows.map((r) => parseCtc(r.ctc)).filter((v): v is number => v != null);
     const avgPackage = ctcValues.length ? ctcValues.reduce((s, n) => s + n, 0) / ctcValues.length : null;
 
+    const branchOrder = useMemo(
+        () => new Map([...TPC_ELIGIBLE_BRANCHES, 'Other', 'Unknown', 'Unspecified'].map((b, i) => [b, i])),
+        []
+    );
     const branchCounts = useMemo(() => {
         const map: Record<string, number> = {};
         rows.forEach((r) => {
@@ -128,8 +130,11 @@ export default function AlumniPage() {
         });
         return Object.entries(map)
             .map(([branchLabel, count]) => ({ branch: branchLabel, count }))
-            .sort((a, b) => b.count - a.count);
-    }, [rows]);
+            .sort(
+                (a, b) =>
+                    (branchOrder.get(a.branch) ?? 99) - (branchOrder.get(b.branch) ?? 99) || b.count - a.count
+            );
+    }, [rows, branchOrder]);
 
     const branchPackageStats = useMemo(() => {
         const map: Record<string, number[]> = {};
@@ -157,10 +162,22 @@ export default function AlumniPage() {
                     countWithCtc: n,
                 };
             })
-            .sort((a, b) => b.avgLpa - a.avgLpa);
-    }, [rows]);
+            .sort(
+                (a, b) =>
+                    (branchOrder.get(a.branchFull) ?? 99) - (branchOrder.get(b.branchFull) ?? 99) ||
+                    b.avgLpa - a.avgLpa
+            );
+    }, [rows, branchOrder]);
 
-    const topBranch = branchCounts[0]?.branch || 'Not available';
+    const topBranch = useMemo(() => {
+        const map: Record<string, number> = {};
+        for (const r of rows) {
+            const b = r.branch || 'Unknown';
+            map[b] = (map[b] || 0) + 1;
+        }
+        const best = Object.entries(map).sort((a, b) => b[1] - a[1])[0];
+        return best ? best[0] : 'Not available';
+    }, [rows]);
 
     const companyCounts = useMemo(() => {
         const map: Record<string, number> = {};

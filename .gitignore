@@ -1,3 +1,6 @@
+# Local archives
+*.zip
+
 # Dependencies
 **/node_modules/
 
@@ -28,3 +31,8 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+.cursor/
+
+# Local data / design exports (not for the repo)
+stitch */
+job_descriptions*/

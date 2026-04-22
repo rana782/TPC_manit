@@ -4,6 +4,7 @@
  */
 import { Request, Response } from 'express';
 import prisma from '../lib/prisma';
+import { compareTpcBranchNames, isTpcBranchCode, normalizeTpcBranch, prismaBranchMatchesCanonical } from '../utils/tpcBranches';
 
 export function parseYearQuery(req: Request): number | null {
     const raw = req.query.year;
@@ -221,7 +222,7 @@ async function computeBranchPlacementAnalytics(year: number | null) {
 
     const branchStudents: Record<string, Set<string>> = {};
     for (const a of apps) {
-        const b = a.student?.branch?.trim() || 'Unknown';
+        const b = normalizeTpcBranch(a.student?.branch) || 'Unknown';
         if (!branchStudents[b]) branchStudents[b] = new Set();
         branchStudents[b]!.add(a.studentId);
     }
@@ -236,7 +237,7 @@ async function computeBranchPlacementAnalytics(year: number | null) {
     const allCtc: number[] = [];
 
     for (const p of placements) {
-        const b = p.student?.branch?.trim() || 'Unknown';
+        const b = normalizeTpcBranch(p.student?.branch) || 'Unknown';
         if (!branchPlaced[b]) branchPlaced[b] = new Set();
         branchPlaced[b]!.add(p.studentId);
         const n = parseCtcToNumber(p.ctc);
@@ -247,7 +248,9 @@ async function computeBranchPlacementAnalytics(year: number | null) {
         }
     }
 
-    const branchNames = [...new Set([...Object.keys(branchStudents), ...Object.keys(branchPlaced)])].sort();
+    const branchNames = [...new Set([...Object.keys(branchStudents), ...Object.keys(branchPlaced)])].sort(
+        compareTpcBranchNames
+    );
     const rows = branchNames.map((branch) => {
         const total = branchStudents[branch]?.size ?? 0;
         const placed = branchPlaced[branch]?.size ?? 0;
@@ -490,10 +493,14 @@ export const exportBranchTimelineExcel = async (req: Request, res: Response) => 
         const year = parseYearQuery(req);
         const placeWh = placementWhere(year);
 
+        const studentBranchWh = isTpcBranchCode(branch)
+            ? prismaBranchMatchesCanonical(branch)
+            : { branch: { equals: branch, mode: 'insensitive' as const } };
+
         const placements = await prisma.placementRecord.findMany({
             where: {
                 ...placeWh,
-                student: { branch: branch },
+                student: studentBranchWh,
             },
             include: {
                 student: {
@@ -551,7 +558,7 @@ export const exportBranchTimelineExcel = async (req: Request, res: Response) => 
                     new Date(p.placedAt).toISOString(),
                     studentName,
                     scholarNo,
-                    branch,
+                    normalizeTpcBranch(p.student?.branch) || branch,
                     p.companyName || '',
                     p.role || '',
                     p.ctc || '',

@@ -15,6 +15,7 @@ import JobDetails from './JobDetails';
 import { formatCompactReviewCount } from '../utils/formatCompactReviewCount';
 import { parseLookupRating, parseLookupReviews } from '../utils/parseCompanyLookup';
 import { getViteApiBase } from '../utils/apiBase';
+import { TPC_ELIGIBLE_BRANCHES } from '../constants/tpcBranches';
 
 interface Job {
     id: string;
@@ -58,7 +59,7 @@ const AVAILABLE_PROFILE_FIELDS = [
     { id: 'panPath', label: 'PAN Document' },
 ];
 
-const BRANCHES = ['CSE', 'ECE', 'MDS', 'EE', 'Mech', 'Civil', 'MME', 'Chem'];
+const BRANCHES = TPC_ELIGIBLE_BRANCHES;
 
 export default function JobsManagement() {
     type CompanyProfileData = {

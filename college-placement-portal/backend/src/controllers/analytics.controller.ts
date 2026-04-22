@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../lib/prisma';
+import { compareTpcBranchNames, normalizeTpcBranch } from '../utils/tpcBranches';
 
 function parseCtcToNumber(ctc?: string | null): number | null {
     if (!ctc) return null;
@@ -52,7 +53,7 @@ export const getBranchComparison = async (req: Request, res: Response) => {
         const branchStats: Record<string, { count: number; totalCtc: number; parsedCtcs: number }> = {};
 
         alumni.forEach(a => {
-            const b = a.branch || 'Unknown';
+            const b = normalizeTpcBranch(a.branch) || 'Unknown';
             if (!branchStats[b]) branchStats[b] = { count: 0, totalCtc: 0, parsedCtcs: 0 };
             
             branchStats[b].count += 1;
@@ -73,7 +74,8 @@ export const getBranchComparison = async (req: Request, res: Response) => {
             avgCtc: stats.parsedCtcs > 0 ? (stats.totalCtc / stats.parsedCtcs).toFixed(2) : '0'
         }));
 
-        return res.json({ success: true, data: result });
+        const sorted = result.sort((x, y) => compareTpcBranchNames(x.branch, y.branch));
+        return res.json({ success: true, data: sorted });
 
     } catch (e: any) {
         return res.status(500).json({ success: false, message: 'Failed to fetch branch comparison.' });
@@ -141,10 +143,13 @@ export const getByBranch = async (req: Request, res: Response) => {
     try {
         const alumni = await prisma.alumni.findMany({ select: { branch: true } });
         const counts: Record<string, number> = {};
-        alumni.forEach(a => { const b = a.branch || 'Unspecified'; counts[b] = (counts[b] || 0) + 1; });
+        alumni.forEach((a) => {
+            const b = normalizeTpcBranch(a.branch) || 'Unspecified';
+            counts[b] = (counts[b] || 0) + 1;
+        });
         const data = Object.entries(counts)
             .map(([branch, count]) => ({ branch, count }))
-            .sort((a, b) => b.count - a.count);
+            .sort((a, b) => compareTpcBranchNames(a.branch, b.branch) || b.count - a.count);
         return res.json({ success: true, data });
     } catch (e: any) {
         return res.status(500).json({ success: false, message: 'Failed to fetch by-branch data.' });
@@ -171,7 +176,7 @@ export const getBranchWiseCurrent = async (req: Request, res: Response) => {
 
         const branchMap: Record<string, BranchAgg> = {};
         for (const r of records) {
-            const branch = r.student?.branch || 'Unknown';
+            const branch = normalizeTpcBranch(r.student?.branch) || 'Unknown';
             if (!branchMap[branch]) {
                 branchMap[branch] = {
                     placedCount: 0,
@@ -212,7 +217,7 @@ export const getBranchWiseCurrent = async (req: Request, res: Response) => {
                     companyDistribution
                 };
             })
-            .sort((a, b) => b.placedCount - a.placedCount);
+            .sort((a, b) => compareTpcBranchNames(a.branch, b.branch) || b.placedCount - a.placedCount);
 
         return res.json({ success: true, branchWise });
     } catch (e: any) {
@@ -239,7 +244,7 @@ export const exportAnalyticsCsv = async (req: Request, res: Response) => {
         type Key = string;
         const grouped: Record<Key, { branch: string; placementYear: number; ctcValues: number[]; companies: Set<string>; totalPlaced: number }> = {};
         for (const r of records) {
-            const branch = r.student?.branch || 'Unknown';
+            const branch = normalizeTpcBranch(r.student?.branch) || 'Unknown';
             const placementYear = new Date(r.placedAt).getFullYear();
             const k = `${branch}__${placementYear}`;
             if (!grouped[k]) {

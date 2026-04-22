@@ -6,6 +6,7 @@ import { enqueueAndSend, sendWhatsApp } from '../services/notification.service';
 import { getResumeTextForAtsWithMeta, getJobTextForAts, buildResumeInputForAtsParser } from './ats.controller';
 import { getATSAnalysis, parseResumeWithLlm } from '../services/atsAnalysis.service';
 import prisma from '../lib/prisma';
+import { normalizeTpcBranch } from '../utils/tpcBranches';
 const MIN_RESUME_TEXT_LENGTH = 50;
 const ATS_DEBUG = String(process.env.ATS_DEBUG || '').toLowerCase() === 'true';
 const ATS_TIMEOUT_MS = Number(process.env.ATS_TIMEOUT_MS || 12000);
@@ -23,28 +24,13 @@ function getStudentFieldForJob(student: Record<string, unknown>, field: string):
     return student[key];
 }
 
-/** Eligible branch codes vs common full names saved on profiles / seeds. */
-const BRANCH_CODE_ALIASES: Record<string, string[]> = {
-    CSE: ['CSE', 'Computer Science', 'CS', 'COMPUTER SCIENCE'],
-    ECE: ['ECE', 'Electronics', 'Electronics and Communication', 'Electronics & Communication'],
-    EE: ['EE', 'Electrical', 'Electrical Engineering'],
-    MDS: ['MDS'],
-    Mech: ['Mech', 'Mechanical', 'Mechanical Engineering'],
-    Civil: ['Civil', 'Civil Engineering'],
-    MME: ['MME'],
-    Chem: ['Chem', 'Chemical', 'Chemical Engineering'],
-};
-
 function branchIsEligible(studentBranch: string | null | undefined, eligibleBranches: string[]): boolean {
     if (!eligibleBranches.length) return true;
     const sb = (studentBranch || '').trim();
     if (!sb) return false;
-    if (eligibleBranches.includes(sb)) return true;
-    const lower = sb.toLowerCase();
-    return eligibleBranches.some((code) => {
-        const aliases = BRANCH_CODE_ALIASES[code];
-        return aliases?.some((a) => a.toLowerCase() === lower) ?? false;
-    });
+    const nStudent = normalizeTpcBranch(sb);
+    const eligibleNorm = new Set(eligibleBranches.map((e) => normalizeTpcBranch(e)));
+    return eligibleNorm.has(nStudent);
 }
 
 /** DB/UI may store JSON arrays as strings; invalid or non-array JSON must not crash apply (e.g. "null", "{}"). */

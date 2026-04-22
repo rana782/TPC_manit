@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { parse } from 'json2csv';
 import prisma from '../lib/prisma';
+import { isTpcBranchCode, normalizeTpcBranch, prismaBranchMatchesCanonical } from '../utils/tpcBranches';
 
 const ALUMNI_SELECT = {
     id: true,
@@ -21,27 +22,32 @@ function buildAlumniWhereClause(query: Request['query']) {
     const company = String(query.company || '').trim();
     const year = yearRaw ? parseInt(yearRaw, 10) : NaN;
 
-    const whereClause: any = q
-        ? {
+    const and: any[] = [];
+
+    if (q) {
+        and.push({
             OR: [
                 { name: { contains: q, mode: 'insensitive' } },
                 { companyName: { contains: q, mode: 'insensitive' } },
                 { role: { contains: q, mode: 'insensitive' } },
             ],
-        }
-        : {};
-
+        });
+    }
     if (branch && branch.toLowerCase() !== 'all') {
-        whereClause.branch = branch;
+        and.push(
+            isTpcBranchCode(branch) ? prismaBranchMatchesCanonical(branch) : { branch: { equals: branch, mode: 'insensitive' } }
+        );
     }
     if (!Number.isNaN(year)) {
-        whereClause.placementYear = year;
+        and.push({ placementYear: year });
     }
     if (company && company.toLowerCase() !== 'all') {
-        whereClause.companyName = company;
+        and.push({ companyName: { equals: company, mode: 'insensitive' } });
     }
 
-    return whereClause;
+    if (!and.length) return {};
+    if (and.length === 1) return and[0]!;
+    return { AND: and };
 }
 
 // GET /api/alumni/search?q=...
@@ -55,8 +61,8 @@ export const searchAlumni = async (req: Request, res: Response) => {
             orderBy: [{ placementYear: 'desc' }, { createdAt: 'desc' }],
             select: ALUMNI_SELECT,
         });
-
-        return res.json({ success: true, data: alumni });
+        const data = alumni.map((a) => ({ ...a, branch: normalizeTpcBranch(a.branch) }));
+        return res.json({ success: true, data });
     } catch (e) {
         return res.status(500).json({ success: false, message: 'Failed to search alumni' });
     }
@@ -68,17 +74,20 @@ export const getAlumniByCompany = async (req: Request, res: Response) => {
         const { companyName } = req.params;
         const { year, branch, role } = req.query;
 
-        const whereClause: any = { companyName };
-        if (year) whereClause.placementYear = parseInt(year as string);
-        if (branch) whereClause.branch = branch as string;
-        if (role) whereClause.role = { contains: role as string, mode: 'insensitive' };
+        const and: any[] = [{ companyName }];
+        if (year) and.push({ placementYear: parseInt(String(year), 10) });
+        if (branch) {
+            const b = String(branch);
+            and.push(isTpcBranchCode(b) ? prismaBranchMatchesCanonical(b) : { branch: { equals: b, mode: 'insensitive' } });
+        }
+        if (role) and.push({ role: { contains: String(role), mode: 'insensitive' } });
 
         const alumni = await prisma.alumni.findMany({
-            where: whereClause,
+            where: and.length > 1 ? { AND: and } : and[0]!,
             orderBy: { placementYear: 'desc' }
         });
-
-        return res.json({ success: true, data: alumni });
+        const data = alumni.map((a) => ({ ...a, branch: normalizeTpcBranch(a.branch) }));
+        return res.json({ success: true, data });
     } catch (e) {
         return res.status(500).json({ success: false, message: 'Failed to fetch alumni' });
     }
@@ -141,7 +150,7 @@ export const exportAlumniFilteredCsv = async (req: Request, res: Response) => {
         const rows = alumni.map((a, idx) => ({
             'S.No.': idx + 1,
             'Name': a.name || '',
-            'Branch': a.branch || '',
+            'Branch': normalizeTpcBranch(a.branch) || '',
             'Company': a.companyName || '',
             'Role': a.role || '',
             'Package (LPA)': a.ctc || '',
