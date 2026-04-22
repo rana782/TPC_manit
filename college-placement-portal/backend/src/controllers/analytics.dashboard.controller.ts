@@ -507,6 +507,7 @@ export const exportBranchTimelineExcel = async (req: Request, res: Response) => 
                     select: {
                         firstName: true,
                         lastName: true,
+                        branch: true,
                         scholarNo: true,
                         linkedin: true,
                         resumes: {
